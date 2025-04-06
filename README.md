@@ -8,7 +8,7 @@
     hnsw<float> index(128);
         
     const size_t num_vectors = 10000;
-    std::vector<std::vector<float>> vectors(num_vectors) = generate_random_vv();
+    std::vector<std::vector<float>> vectors(num_vectors) = generate_random_vv(num_vectors, 128);
     
     // Build the index
     auto start = std::chrono::high_resolution_clock::now();
@@ -19,7 +19,7 @@
     }
     
     // Search for nearest neighbors
-    std::vector<float> query(128) = generate_random_v();
+    std::vector<float> query(128) = generate_random_v(128);
     
     const size_t k = 10;
     auto results = index.search(query, k);
