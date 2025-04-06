@@ -14,13 +14,9 @@
     const size_t num_vectors = 10000;
     std::vector<std::vector<float>> vectors(num_vectors) = generate_random_vv(num_vectors, 128);
     
-    // Build the index
-    auto start = std::chrono::high_resolution_clock::now();
-    
+    // Build the index    
     for (size_t i = 0; i < vectors.size(); ++i)
-    {
         index.add_item(vectors[i]);
-    }
     
     // Search for nearest neighbors
     std::vector<float> query(128) = generate_random_v(128);
