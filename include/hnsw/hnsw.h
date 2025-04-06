@@ -7,10 +7,10 @@
 #include <queue>
 #include <unordered_set>
 #include <memory>
-#include <cmath>
-#include <iostream>
-#include <limits>
 #include <chrono>
+#include <limits>
+
+#include <cmath>
 
 namespace dicroce
 {
@@ -306,7 +306,8 @@ private:
         const std::vector<T>& query,
         const std::vector<size_t>& entrypoints,
         size_t ef,
-        size_t level) const
+        size_t level
+    ) const
     {
         // Protection against empty entrypoints
         if (entrypoints.empty())
@@ -402,14 +403,7 @@ private:
                 }
             }
         }
-        
-        // Check if we exited due to max iterations
-        if (iterations >= max_iterations)
-        {
-            std::cerr << "Warning: Search reached maximum iterations (" << max_iterations 
-                      << ") at level " << level << std::endl;
-        }
-        
+
         // Convert results to vector of IDs
         std::vector<size_t> result_ids;
         while (!result.empty())
@@ -422,7 +416,8 @@ private:
     }
     
     // Prune connections to maintain small-world property
-    void _prune_connections(size_t node_id, size_t level) {
+    void _prune_connections(size_t node_id, size_t level)
+    {
         // Check if node_id is valid
         if (node_id >= _nodes.size())
             return;
@@ -499,6 +494,6 @@ private:
     }
 };
 
-} // namespace hnsw
+}
 
 #endif
