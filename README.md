@@ -8,8 +8,12 @@
 ### Example
 
 ```
+#include "hnsw/hsnw.h"
+
+int main(int argc, char* argv[])
+{
     // Create an index for 128-dimensional vectors
-    hnsw<float> index(128);
+    dicroce::hnsw<float> index(128);
         
     const size_t num_vectors = 10000;
     std::vector<std::vector<float>> vectors(num_vectors) = generate_random_vv(num_vectors, 128);
@@ -26,6 +30,7 @@
     
     for (const auto& result : results)
         printf("ID: %lu, Distance: %f\n", result.first, result.second);
+}
 ```
 
 ### Compilation
