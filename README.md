@@ -5,6 +5,22 @@
 + Approximately 500 lines of code
 + Fast (and getting faster)
 
+## What is HNSW?
+
+// Level 2           *                    *        *                                        *
+// Level 1        *  *              *     *        *        *          **                 * *
+// Level 0  *     ** *     * * *    *    **   *  * *  * ** **          **     ** *    *   * *   * * *
+
+HNSW is a graph structure that consists of levels that are more sparsely populated at the top and more
+densely populated at the bottom. Nodes within a layer have connections to other nodes that are near them
+on the same level. When a node is inserted a random level is picked and the node is inserted there. It
+is also inserted into all levels beneath that level down to 0.
+
+When searches arrive they start at the top and search that level (following connections) until they find
+the closest node in the top level. The search then descends and keeps searching nearby nodes. As the
+search progresses the code keeps track of the K nearest nodes it has seen. Eventually it either finds
+the value OR it finds the closest value on level 0 and the K nearest nodes seen are returned.
+
 ### Example
 
 ```
