@@ -1,0 +1,27 @@
+include(TestBigEndian)
+
+# Global Config
+
+set(CMAKE_CXX_STANDARD 17)
+
+if(IS_BIG_ENDIAN)
+    add_compile_definitions(IS_BIG_ENDIAN)
+else()
+    add_compile_definitions(IS_LITTLE_ENDIAN)
+endif()
+
+if(NOT CMAKE_BUILD_TYPE)
+    set (CMAKE_BUILD_TYPE Debug)
+endif()
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+    add_compile_definitions(IS_WINDOWS)
+endif()
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    add_compile_definitions(IS_LINUX)
+    add_compile_options(
+        "-fno-omit-frame-pointer"
+        "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb3;-fasynchronous-unwind-tables>"
+    )
+endif()
