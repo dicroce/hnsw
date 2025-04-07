@@ -1,6 +1,7 @@
 
 #include "test_hnsw.h"
 #include "hnsw/hnsw.h"
+#include "Eigen/Dense"
 #include <random>
 #include <vector>
 #include <chrono>
@@ -22,14 +23,14 @@ void test_hnsw::test_basic()
 {
     // Create an index for 128-dimensional vectors
     hnsw<float> index(128);
-    
+
     // Generate some random vectors
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dist(-1.0, 1.0);
     
     const size_t num_vectors = 10000;
-    std::vector<std::vector<float>> vectors(num_vectors);
+    std::vector<hnsw_types<float>::vector_type> vectors(num_vectors);
     
     for (auto& vec : vectors)
     {
@@ -47,13 +48,13 @@ void test_hnsw::test_basic()
         if (i % 1000 == 0 && i > 0)
             printf("Added %lu vectors\n", i);
     }
-    
+
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end - start;
     printf("Index built in %f seconds\n", elapsed.count());
 
     // Search for nearest neighbors
-    std::vector<float> query(128);
+    hnsw_types<float>::vector_type query(128);
     for (auto& val : query)
         val = dist(gen);
     

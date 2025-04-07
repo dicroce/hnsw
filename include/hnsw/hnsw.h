@@ -12,6 +12,8 @@
 
 #include <cmath>
 
+#include <Eigen/Dense>
+
 namespace dicroce
 {
 
@@ -47,23 +49,30 @@ struct hnsw_config
     distance_metric METRIC = distance_metric::L2;
 };
 
-template<typename T>
+template<typename scalar>
+struct hnsw_types {
+    using vector_type = Eigen::VectorX<scalar>;
+};
+
+template<typename scalar>
 class hnsw;
 
-template<typename T>
+template<typename scalar>
 class hnsw_node final
 {
-    friend class hnsw<T>;
+    friend class hnsw<scalar>;
 
 public:
-    hnsw_node(const std::vector<T>& vec, size_t id, size_t level) :
+    using vector_type = typename hnsw_types<scalar>::vector_type;
+
+    hnsw_node(const vector_type& vec, size_t id, size_t level) :
         _vec(vec), _id(id), _level(level)
     {
         // Initialize connections for each level
         _connections.resize(level + 1);
     }
     
-    const std::vector<T>& get_vector() const
+    const vector_type& get_vector() const
     {
         return _vec;
     }
@@ -109,7 +118,7 @@ public:
     
 private:
     // The vector data
-    std::vector<T> _vec;
+    vector_type _vec;
     // Unique identifier
     size_t _id;
     // Level of this node in the hierarchy
@@ -142,10 +151,12 @@ struct neighbor final
 };
 
 // Main hnsw index class
-template<typename T>
+template<typename scalar>
 class hnsw final
 {
 public:
+    using vector_type = typename hnsw_types<scalar>::vector_type;
+
     hnsw(size_t dim, const hnsw_config& config = hnsw_config()) :
         _dim(dim), _config(config), _random_engine(std::random_device{}())
     {
@@ -153,7 +164,7 @@ public:
     }
     
     // Add a vector to the index
-    void add_item(const std::vector<T>& vec)
+    void add_item(const vector_type& vec)
     {
         if (vec.size() != _dim)
             throw std::invalid_argument("Vector dimension does not match index dimension");
@@ -170,14 +181,18 @@ public:
         // If this is the first node, it's the entry point
         if (_nodes.empty())
         {
-            auto node = std::make_unique<hnsw_node<T>>(vec, idx, random_level);
+            auto node = std::make_unique<hnsw_node<scalar>>(vec, idx, random_level);
             _nodes.push_back(std::move(node));
             _entrypoint = 0;
             return;
         }
         
         // Create new node
-        auto next_node = std::make_unique<hnsw_node<T>>(vec, idx, random_level);
+        auto next_node = std::make_unique<hnsw_node<scalar>>(vec, idx, random_level);
+
+        for (size_t i = 0; i <= random_level; ++i)
+            next_node->_connections[i].reserve(_config.M);
+
         std::vector<size_t> ep_copy{_entrypoint};
         
         // Search from top level to level 1
@@ -233,7 +248,7 @@ public:
     }
     
     // Search for k nearest neighbors
-    std::vector<std::pair<size_t, T>> search(const std::vector<T>& query, size_t k) const
+    std::vector<std::pair<size_t, scalar>> search(const vector_type& query, size_t k) const
     {
         if (query.size() != _dim)
             throw std::invalid_argument("Query dimension does not match index dimension");
@@ -255,10 +270,10 @@ public:
         std::vector<size_t> results = _search_base_layer(query, entrypoints, _config.SEARCH_EXPANSION_FACTOR, 0);
         
         // Calculate distances for the results
-        std::vector<neighbor<T>> candidates;
+        std::vector<neighbor<scalar>> candidates;
         for (size_t id : results)
         {
-            T dist = _distance(query, _nodes[id]->get_vector());
+            scalar dist = _distance(query, _nodes[id]->get_vector());
             candidates.emplace_back(id, dist);
         }
         
@@ -266,7 +281,7 @@ public:
         std::sort(candidates.begin(), candidates.end());
         
         // Return top k results
-        std::vector<std::pair<size_t, T>> final_results;
+        std::vector<std::pair<size_t, scalar>> final_results;
         for (size_t i = 0; i < std::min(k, candidates.size()); ++i)
             final_results.emplace_back(candidates[i]._id, candidates[i]._distance);
         
@@ -291,7 +306,7 @@ private:
     // Configuration parameters
     hnsw_config _config;
     // All nodes in the index
-    std::vector<std::unique_ptr<hnsw_node<T>>> _nodes;
+    std::vector<std::unique_ptr<hnsw_node<scalar>>> _nodes;
     // Entry point to the graph
     size_t _entrypoint = 0;
     // Current maximum level in the graph
@@ -303,7 +318,7 @@ private:
     
     // Search at a specific level
     std::vector<size_t> _search_base_layer(
-        const std::vector<T>& query,
+        const vector_type& query,
         const std::vector<size_t>& entrypoints,
         size_t ef,
         size_t level
@@ -321,26 +336,26 @@ private:
         ef = std::max(size_t(1), ef);
         
         // Priority queue for the closest neighbors found so far (max heap)
-        std::priority_queue<neighbor<T>> result;
+        std::priority_queue<neighbor<scalar>> result;
         
         // Priority queue for candidates to explore (min heap)
-        std::priority_queue<neighbor<T>, std::vector<neighbor<T>>, std::greater<>> candidates;
+        std::priority_queue<neighbor<scalar>, std::vector<neighbor<scalar>>, std::greater<>> candidates;
         
         // Set to track visited nodes
-        std::unordered_set<size_t> visited;
+        std::vector<bool> visited(_nodes.size(), false);
         
         // Initialize with entrypoints
-        T furthest_dist = std::numeric_limits<T>::max();
+        scalar furthest_dist = std::numeric_limits<scalar>::max();
         for (size_t ep : entrypoints)
         {
             // Validate index
             if (ep >= _nodes.size())
                 continue;
             
-            T dist = _distance(query, _nodes[ep]->get_vector());
+            scalar dist = _distance(query, _nodes[ep]->get_vector());
             candidates.emplace(ep, dist);
             result.emplace(ep, dist);
-            visited.insert(ep);
+            visited[ep] = true;
             
             if (result.size() > ef)
                 result.pop();
@@ -360,7 +375,7 @@ private:
         {
             iterations++;
             
-            neighbor<T> current = candidates.top();
+            neighbor<scalar> current = candidates.top();
             candidates.pop();
             
             // Stop if we've found enough closer neighbors
@@ -381,12 +396,12 @@ private:
                 // Validate index
                 if (neighbor_id >= _nodes.size())
                     continue;
-                
-                if (visited.find(neighbor_id) == visited.end())
+
+                if (!visited[neighbor_id])
                 {
-                    visited.insert(neighbor_id);
+                    visited[neighbor_id] = true;
                     
-                    T dist = _distance(query, _nodes[neighbor_id]->get_vector());
+                    scalar dist = _distance(query, _nodes[neighbor_id]->get_vector());
                     
                     // Add to results if distance is small enough
                     if (dist < furthest_dist || result.size() < ef)
@@ -434,7 +449,7 @@ private:
             return;
         
         // Calculate distances from this node to all connections
-        std::vector<neighbor<T>> neighbors;
+        std::vector<neighbor<scalar>> neighbors;
         for (size_t i = 0; i < connections.size(); ++i)
         {
             size_t neighbor_id = connections[i];
@@ -443,7 +458,7 @@ private:
             if (neighbor_id >= _nodes.size())
                 continue;
             
-            T dist = _distance(node->get_vector(), _nodes[neighbor_id]->get_vector());
+            scalar dist = _distance(node->get_vector(), _nodes[neighbor_id]->get_vector());
             neighbors.emplace_back(neighbor_id, dist);
         }
         
@@ -457,7 +472,7 @@ private:
     }
     
     // Calculate distance between two vectors based on the chosen metric
-    T _distance(const std::vector<T>& a, const std::vector<T>& b) const
+    scalar _distance(const vector_type& a, const vector_type& b) const
     {
         if (_config.METRIC == hnsw_config::distance_metric::L2)
             return _l2_distance(a, b);
@@ -465,31 +480,21 @@ private:
     }
     
     // L2 squared distance
-    T _l2_distance(const std::vector<T>& a, const std::vector<T>& b) const
+    scalar _l2_distance(const vector_type& a, const vector_type& b) const
     {
-        T result = 0;
-        for (size_t i = 0; i < a.size(); ++i)
-        {
-            T diff = a[i] - b[i];
-            result += diff * diff;
-        }
-        return result;
+        return (a - b).squaredNorm();
     }
     
     // Cosine distance (1 - cosine similarity)
-    T _cosine_distance(const std::vector<T>& a, const std::vector<T>& b) const
+    scalar _cosine_distance(const vector_type& a, const vector_type& b) const
     {
-        T dot = 0, norma = 0, normb = 0;
-        for (size_t i = 0; i < a.size(); ++i)
-        {
-            dot += a[i] * b[i];
-            norma += a[i] * a[i];
-            normb += b[i] * b[i];
-        }
-        
-        if (norma == 0 || normb == 0)
-            return 1.0; // Maximum distance
-        
+        scalar dot = a.dot(b);
+        scalar norma = a.squaredNorm();
+        scalar normb = b.squaredNorm();
+
+        if (norma <= 0 || normb <= 0)
+            return 1.0;
+
         return 1.0 - dot / (std::sqrt(norma) * std::sqrt(normb));
     }
 };
