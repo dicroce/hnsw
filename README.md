@@ -1,5 +1,5 @@
 # HNSW - Hierarchical Navigable Small Worlds
-## Nearest neighbor search for vectorized embeddings
+## Nearest neighbor search for vector embeddings
 
 + Single header, modern C++
 + Approximately 500 lines of code
