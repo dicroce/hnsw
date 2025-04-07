@@ -1,9 +1,9 @@
 # HNSW - Hierarchical Navigable Small Worlds
 ## Nearest neighbor search for vector embeddings
 
-+ Single header, modern C++
-+ Approximately 500 lines of code
-+ Fast (and getting faster)
++ Single header, modern C++.
++ Approximately 500 lines of code.
++ Fast (uses Eigen for SIMD acceleration of distance calculations).
 
 ## What is HNSW?
 ```
