@@ -28,8 +28,10 @@ namespace dicroce
 // Configuration parameters for HNSW
 struct hnsw_config
 {
-    // Maximum number of connections per element per layer
+    // Maximum number of connections per element per layer (except layer 0)
     size_t M = 16;
+    // Maximum number of connections for layer 0 (usually 2*M)
+    size_t M0 = 32;
     // Size of the dynamic candidate list for construction
     size_t CONSTRUCTION_EXPANSION_FACTOR = 200; 
     // Size of the dynamic candidate list for search
@@ -191,7 +193,15 @@ public:
         auto next_node = std::make_unique<hnsw_node<scalar>>(vec, idx, random_level);
 
         for (size_t i = 0; i <= random_level; ++i)
-            next_node->_connections[i].reserve(_config.M);
+        {
+            size_t capacity = (i == 0) ? _config.M0 : _config.M;
+            next_node->_connections[i].reserve(capacity);
+        }
+
+        // CRITICAL FIX: Add node to the index BEFORE setting up connections
+        // Keep a raw pointer to the node for connection setup
+        hnsw_node<scalar>* node_ptr = next_node.get();
+        _nodes.push_back(std::move(next_node));
 
         std::vector<size_t> ep_copy{_entrypoint};
         
@@ -217,7 +227,7 @@ public:
             std::vector<size_t> neighbors = _search_base_layer(vec, ep_copy, _config.CONSTRUCTION_EXPANSION_FACTOR, curr_level);
             
             // Add bidirectional connections
-            next_node->set_connections(curr_level, neighbors);
+            node_ptr->set_connections(curr_level, neighbors);
             
             // Add connections back to this node
             for (size_t neighbor_id : neighbors)
@@ -242,9 +252,6 @@ public:
 
             curr_level--;
         }
-        
-        // Add node to the index
-        _nodes.push_back(std::move(next_node));
     }
     
     // Search for k nearest neighbors
@@ -419,13 +426,20 @@ private:
             }
         }
 
-        // Convert results to vector of IDs
+        // Convert results to vector of IDs (reverse order since priority_queue is max-heap)
         std::vector<size_t> result_ids;
+        std::vector<neighbor<scalar>> temp_results;
+        
         while (!result.empty())
         {
-            result_ids.push_back(result.top()._id);
+            temp_results.push_back(result.top());
             result.pop();
         }
+        
+        // Sort by distance (ascending) and extract IDs
+        std::sort(temp_results.begin(), temp_results.end());
+        for (const auto& n : temp_results)
+            result_ids.push_back(n._id);
         
         return result_ids;
     }
@@ -445,7 +459,10 @@ private:
         
         auto& connections = node->_connections[level];
         
-        if (connections.size() <= _config.M)
+        // Use M0 for level 0, M for higher levels
+        size_t max_connections = (level == 0) ? _config.M0 : _config.M;
+        
+        if (connections.size() <= max_connections)
             return;
         
         // Calculate distances from this node to all connections
@@ -465,9 +482,9 @@ private:
         // Sort by distance
         std::sort(neighbors.begin(), neighbors.end());
         
-        // Keep only M closest connections
+        // Keep only max_connections closest connections
         connections.clear();
-        for (size_t i = 0; i < std::min(_config.M, neighbors.size()); ++i)
+        for (size_t i = 0; i < std::min(max_connections, neighbors.size()); ++i)
             connections.push_back(neighbors[i]._id);
     }
     
@@ -485,17 +502,26 @@ private:
         return (a - b).squaredNorm();
     }
     
-    // Cosine distance (1 - cosine similarity)
+    // Cosine distance (1 - cosine similarity) with numerical stability
     scalar _cosine_distance(const vector_type& a, const vector_type& b) const
     {
         scalar dot = a.dot(b);
-        scalar norma = a.squaredNorm();
-        scalar normb = b.squaredNorm();
-
-        if (norma <= 0 || normb <= 0)
-            return 1.0;
-
-        return 1.0 - dot / (std::sqrt(norma) * std::sqrt(normb));
+        scalar norm_a = a.norm();
+        scalar norm_b = b.norm();
+        
+        // Handle zero or very small vectors
+        const scalar epsilon = std::numeric_limits<scalar>::epsilon();
+        if (norm_a < epsilon || norm_b < epsilon)
+            return scalar(2.0);  // Maximum cosine distance
+        
+        // Compute cosine similarity
+        scalar cosine_sim = dot / (norm_a * norm_b);
+        
+        // Clamp to [-1, 1] to handle numerical errors
+        cosine_sim = std::max(scalar(-1.0), std::min(scalar(1.0), cosine_sim));
+        
+        // Return cosine distance [0, 2]
+        return scalar(1.0) - cosine_sim;
     }
 };
 
