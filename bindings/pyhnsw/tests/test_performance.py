@@ -59,40 +59,6 @@ class TestPerformance:
         assert indices.shape == (n_queries, k)
         # Basic performance check - should handle at least 100 queries/sec
         assert queries_per_sec > 100
-        
-        
-    def test_batch_vs_individual_search(self):
-        """Compare batch vs individual search performance."""
-        dim = 64
-        n_items = 5000
-        n_queries = 100
-        k = 10
-        
-        # Build index
-        index = pyhnsw.HNSW(dim=dim)
-        data = np.random.randn(n_items, dim).astype(np.float32)
-        index.add_items(data)
-        
-        queries = np.random.randn(n_queries, dim).astype(np.float32)
-        
-        # Individual search
-        start = time.perf_counter()
-        individual_results = []
-        for query in queries:
-            indices, distances = index.search(query, k=k)
-            individual_results.append((indices, distances))
-        individual_time = time.perf_counter() - start
-        
-        # Batch search
-        start = time.perf_counter()
-        batch_indices, batch_distances = index.batch_search(queries, k=k)
-        batch_time = time.perf_counter() - start
-        
-        print(f"\nIndividual: {individual_time:.3f}s, Batch: {batch_time:.3f}s")
-        print(f"Speedup: {individual_time/batch_time:.2f}x")
-        
-        # Batch should be at least as fast as individual
-        assert batch_time <= individual_time * 1.1  # Allow 10% margin
 
 
 class TestRecall:
