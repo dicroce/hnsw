@@ -482,10 +482,37 @@ private:
         // Sort by distance
         std::sort(neighbors.begin(), neighbors.end());
         
-        // Keep only max_connections closest connections
+        // Keep 70% closest connections and 30% farthest connections
         connections.clear();
-        for (size_t i = 0; i < std::min(max_connections, neighbors.size()); ++i)
-            connections.push_back(neighbors[i]._id);
+        
+        if (neighbors.size() <= max_connections)
+        {
+            // If we have fewer neighbors than max_connections, keep all
+            for (const auto& neighbor : neighbors)
+                connections.push_back(neighbor._id);
+        }
+        else
+        {
+            // Calculate how many close vs far connections to keep
+            size_t close_count = static_cast<size_t>(max_connections * 0.7);
+            size_t far_count = max_connections - close_count;
+            
+            // Ensure we have at least 1 close connection
+            if (close_count == 0)
+            {
+                close_count = 1;
+                far_count = max_connections - 1;
+            }
+            
+            // Keep closest neighbors
+            for (size_t i = 0; i < close_count && i < neighbors.size(); ++i)
+                connections.push_back(neighbors[i]._id);
+            
+            // Keep some of the farthest neighbors for long-range connectivity
+            size_t start_far = neighbors.size() - far_count;
+            for (size_t i = start_far; i < neighbors.size() && connections.size() < max_connections; ++i)
+                connections.push_back(neighbors[i]._id);
+        }
     }
     
     // Calculate distance between two vectors based on the chosen metric
