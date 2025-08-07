@@ -183,6 +183,9 @@ jobs:
         path: dist
         merge-multiple: true
     
+    - name: List downloaded artifacts
+      run: find dist -type f -name "*.whl" -o -name "*.tar.gz" | sort
+    
     - uses: pypa/gh-action-pypi-publish@release/v1
       with:
         packages-dir: dist/
