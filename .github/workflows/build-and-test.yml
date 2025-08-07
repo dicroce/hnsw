@@ -84,7 +84,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
+        python -m pip install --upgrade --quiet pip
         pip install pytest pytest-benchmark numpy pybind11
     
     - name: Build and install Python package
