@@ -1,4 +1,4 @@
-name: Build and Test
+name: CMake on multiple platforms
 
 on:
   push:
@@ -98,12 +98,24 @@ jobs:
         pytest tests/ -v
 
   build_wheels:
-    name: Build wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Build wheels on ${{ matrix.runs-on }}
+    runs-on: ${{ matrix.runs-on }}
     if: github.event_name == 'release'
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: linux-intel
+            runs-on: ubuntu-latest
+          - os: linux-arm
+            runs-on: ubuntu-latest  # ARM builds on standard runners for now
+          - os: windows-intel
+            runs-on: windows-latest
+          - os: windows-arm
+            runs-on: windows-latest  # ARM builds on standard runners for now
+          - os: macos-intel
+            runs-on: macos-13
+          - os: macos-arm
+            runs-on: macos-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -119,12 +131,16 @@ jobs:
         CIBW_BUILD_VERBOSITY: 1
         CIBW_TEST_REQUIRES: pytest pytest-benchmark numpy
         CIBW_TEST_COMMAND: "cd {project}/bindings/pyhnsw && pytest tests/ -v --tb=short"
+        # Platform-specific configurations
+        CIBW_ARCHS_LINUX: auto64
+        CIBW_ARCHS_WINDOWS: auto64
+        CIBW_ARCHS_MACOS: "x86_64 arm64"
       with:
         package-dir: bindings/pyhnsw
 
     - uses: actions/upload-artifact@v4
       with:
-        name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+        name: cibw-wheels-${{ matrix.os }}
         path: ./wheelhouse/*.whl
 
   make_sdist:
