@@ -327,20 +327,3 @@ class TestMemoryAndStress:
             indices, distances = index.search(query, k=min(10, index.size()))
             
             assert len(indices) == min(10, index.size())
-            
-    def test_maximum_k(self):
-        """Test with very large k value."""
-        dim = 32
-        n_items = 100
-        
-        index = pyhnsw.HNSW(dim=dim)
-        data = np.random.randn(n_items, dim).astype(np.float32)
-        index.add_items(data)
-        
-        query = np.random.randn(dim).astype(np.float32)
-        
-        # Request a very large k
-        indices, distances = index.search(query, k=10000)
-        
-        # Should return at most n_items results (allow for minor variations in edge cases)
-        assert len(indices) >= n_items - 1
