@@ -135,9 +135,9 @@ jobs:
         CIBW_ARCHS_LINUX: auto64
         CIBW_ARCHS_WINDOWS: auto64
         CIBW_ARCHS_MACOS: "x86_64 arm64"
-        # Install git for Eigen download (setup.py will fetch Eigen if needed)
-        CIBW_BEFORE_ALL_LINUX: "yum install -y git || apt-get update && apt-get install -y git"
-        CIBW_BEFORE_ALL_MACOS: "brew install git || true"
+        # Ensure git is available for Eigen download (setup.py will fetch Eigen if needed)
+        CIBW_BEFORE_ALL_LINUX: "yum install -y git || true"
+        CIBW_BEFORE_ALL_MACOS: ""
         CIBW_BEFORE_ALL_WINDOWS: ""
       with:
         package-dir: bindings/pyhnsw
