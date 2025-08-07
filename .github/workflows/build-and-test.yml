@@ -130,7 +130,7 @@ jobs:
         CIBW_SKIP: "pp* *-win32"  # Skip PyPy and 32-bit Windows
         CIBW_BUILD_VERBOSITY: 1
         CIBW_TEST_REQUIRES: pytest pytest-benchmark numpy
-        CIBW_TEST_COMMAND: "cd {project}/bindings/pyhnsw && pytest tests/ -v --tb=short"
+        CIBW_TEST_COMMAND: "pytest {project}/bindings/pyhnsw/tests -v --tb=short"
         # Platform-specific configurations
         CIBW_ARCHS_LINUX: auto64
         CIBW_ARCHS_WINDOWS: auto64
