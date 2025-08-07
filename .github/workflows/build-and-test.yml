@@ -135,6 +135,9 @@ jobs:
         CIBW_ARCHS_LINUX: auto64
         CIBW_ARCHS_WINDOWS: auto64
         CIBW_ARCHS_MACOS: "x86_64 arm64"
+        # Install Eigen before building
+        CIBW_BEFORE_BUILD_MACOS: "brew install eigen"
+        CIBW_BEFORE_BUILD_LINUX: "yum install -y eigen3-devel || apt-get update && apt-get install -y libeigen3-dev"
       with:
         package-dir: bindings/pyhnsw
 
