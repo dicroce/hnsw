@@ -156,20 +156,11 @@ jobs:
         python -m twine check ./wheelhouse/*.whl
         python -c "import glob; import zipfile; [print(f'Testing {w}') or zipfile.ZipFile(w).testzip() or print('OK') for w in glob.glob('./wheelhouse/*.whl')]"
 
-    - name: Archive wheels using tar (macOS compatibility)
-      run: |
-        # Use tar for better reliability on macOS to prevent corruption
-        mkdir -p artifacts
-        if [[ "${{ matrix.os }}" == *"macos"* ]]; then
-          # Use GNU tar on macOS for better compatibility
-          if command -v gtar >/dev/null 2>&1; then
-            gtar -czf artifacts/wheels.tar.gz -C ./wheelhouse .
-          else
-            tar -czf artifacts/wheels.tar.gz -C ./wheelhouse .
-          fi
-        else
-          tar -czf artifacts/wheels.tar.gz -C ./wheelhouse .
-        fi
+    - name: Create artifacts directory
+      run: python -c "import os; os.makedirs('artifacts', exist_ok=True)"
+    
+    - name: Archive wheels 
+      run: python -c "import tarfile, glob, os; tar = tarfile.open('artifacts/wheels.tar.gz', 'w:gz'); [tar.add(w, arcname=os.path.basename(w)) for w in glob.glob('./wheelhouse/*.whl')]; tar.close()"
     
     - uses: actions/upload-artifact@v4
       with:
