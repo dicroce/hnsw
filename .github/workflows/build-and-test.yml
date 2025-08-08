@@ -156,10 +156,25 @@ jobs:
         python -m twine check ./wheelhouse/*.whl
         python -c "import glob; import zipfile; [print(f'Testing {w}') or zipfile.ZipFile(w).testzip() or print('OK') for w in glob.glob('./wheelhouse/*.whl')]"
 
+    - name: Archive wheels using tar (macOS compatibility)
+      run: |
+        # Use tar for better reliability on macOS to prevent corruption
+        mkdir -p artifacts
+        if [[ "${{ matrix.os }}" == *"macos"* ]]; then
+          # Use GNU tar on macOS for better compatibility
+          if command -v gtar >/dev/null 2>&1; then
+            gtar -czf artifacts/wheels.tar.gz -C ./wheelhouse .
+          else
+            tar -czf artifacts/wheels.tar.gz -C ./wheelhouse .
+          fi
+        else
+          tar -czf artifacts/wheels.tar.gz -C ./wheelhouse .
+        fi
+    
     - uses: actions/upload-artifact@v4
       with:
         name: cibw-wheels-${{ matrix.os }}
-        path: ./wheelhouse/*.whl
+        path: artifacts/wheels.tar.gz
 
   make_sdist:
     name: Make SDist
@@ -192,10 +207,21 @@ jobs:
     - uses: actions/download-artifact@v4
       with:
         pattern: cibw-*
-        path: dist
+        path: artifacts
         merge-multiple: true
     
-    - name: Fix potentially corrupted macOS wheels
+    - name: Extract wheel archives
+      run: |
+        # Extract all wheel tar.gz files to dist directory
+        mkdir -p dist
+        for archive in artifacts/*.tar.gz; do
+          if [ -f "$archive" ]; then
+            echo "Extracting $archive..."
+            tar -xzf "$archive" -C dist/
+          fi
+        done
+    
+    - name: Remove corrupted wheels
       run: |
         # Sometimes macOS wheels get corrupted during artifact upload/download
         # This attempts to repair them using wheel unpack/pack

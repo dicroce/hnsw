@@ -1,0 +1,12 @@
+# Mark wheel files as binary to prevent Git corruption
+*.whl binary
+*.tar.gz binary
+*.zip binary
+
+# Standard binary file types
+*.so binary
+*.dll binary
+*.dylib binary
+*.exe binary
+*.a binary
+*.lib binary
