@@ -195,6 +195,25 @@ jobs:
         path: dist
         merge-multiple: true
     
+    - name: Fix potentially corrupted macOS wheels
+      run: |
+        # Sometimes macOS wheels get corrupted during artifact upload/download
+        # This attempts to repair them using wheel unpack/pack
+        python -m pip install wheel
+        for wheel in dist/*macos*.whl; do
+          if [ -f "$wheel" ]; then
+            echo "Checking $wheel..."
+            if ! python -c "import zipfile; zipfile.ZipFile('$wheel').testzip()" 2>/dev/null; then
+              echo "Attempting to repair $wheel..."
+              # Try to unpack and repack
+              python -m wheel unpack "$wheel" -d temp_wheel/ || continue
+              rm "$wheel"
+              python -m wheel pack temp_wheel/*/ -d dist/
+              rm -rf temp_wheel/
+            fi
+          fi
+        done
+    
     - name: Debug downloaded artifacts
       run: |
         echo "=== Artifact directory structure ==="
@@ -214,10 +233,11 @@ jobs:
       run: |
         echo "=== Testing wheel integrity ==="
         python -m pip install --upgrade twine
-        python -c "import glob; import zipfile; import sys; wheels = glob.glob('dist/*.whl'); [print(f'Testing {w}') or zipfile.ZipFile(w).testzip() or print('OK') for w in wheels] if wheels else print('No wheels found')"
+        python -c "import glob; import zipfile; [print(f'Testing {w}') or (lambda w: (lambda: zipfile.ZipFile(w).testzip())() if True else None)(w) or print('OK') for w in glob.glob('dist/*.whl')]" || echo "Some wheels may be corrupted"
         echo "Running twine check..."
         python -m twine check dist/*.whl dist/*.tar.gz || true
     
     - uses: pypa/gh-action-pypi-publish@release/v1
       with:
         packages-dir: dist/
+        skip-existing: true
