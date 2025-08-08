@@ -165,91 +165,118 @@ public:
         _level_generator = std::geometric_distribution<size_t>(_config.NORMALIZATION_FACTOR);
     }
     
-    // Add a vector to the index
+    // Add a vector to the index (normalized-once for COSINE, diversified selection)
     void add_item(const vector_type& vec)
     {
         if (vec.size() != _dim)
             throw std::invalid_argument("Vector dimension does not match index dimension");
-        
+
         const size_t idx = _nodes.size();
-        
-        // Generate random level for this node
+
+        // Pick a random level for this node
         size_t random_level = _level_generator(_random_engine);
         random_level = std::min(random_level, _config.MAX_LEVEL);
-        
+
         if (random_level > _current_max_level)
             _current_max_level = random_level;
-        
-        // If this is the first node, it's the entry point
+
+        // Prepare stored vector (normalize once for cosine)
+        vector_type stored = vec;
+        if (_config.METRIC == hnsw_config::distance_metric::COSINE) {
+            scalar n = stored.norm();
+            if (n > std::numeric_limits<scalar>::epsilon()) stored /= n;
+        }
+
+        // First node: just insert and set entrypoint
         if (_nodes.empty())
         {
-            auto node = std::make_unique<hnsw_node<scalar>>(vec, idx, random_level);
+            auto node = std::make_unique<hnsw_node<scalar>>(stored, idx, random_level);
             _nodes.push_back(std::move(node));
             _entrypoint = 0;
             return;
         }
-        
-        // Create new node
-        auto next_node = std::make_unique<hnsw_node<scalar>>(vec, idx, random_level);
 
-        for (size_t i = 0; i <= random_level; ++i)
-        {
+        // Create the new node with reserved per-level capacity
+        auto next_node = std::make_unique<hnsw_node<scalar>>(stored, idx, random_level);
+        for (size_t i = 0; i <= random_level; ++i) {
             size_t capacity = (i == 0) ? _config.M0 : _config.M;
             next_node->_connections[i].reserve(capacity);
         }
 
-        // CRITICAL FIX: Add node to the index BEFORE setting up connections
-        // Keep a raw pointer to the node for connection setup
+        // Add node to index BEFORE wiring links
         hnsw_node<scalar>* node_ptr = next_node.get();
         _nodes.push_back(std::move(next_node));
 
+        // Greedy descent from top to (random_level + 1)
         std::vector<size_t> ep_copy{_entrypoint};
-        
-        // Search from top level to level 1
         int curr_level = static_cast<int>(_current_max_level);
         while (curr_level > static_cast<int>(random_level))
         {
-            std::vector<size_t> next_ep = _search_base_layer(vec, ep_copy, 1, curr_level);
-            if (!next_ep.empty())
-                ep_copy = next_ep;
+            std::vector<size_t> next_ep = _search_base_layer(stored, ep_copy, 1, curr_level);
+            if (!next_ep.empty()) ep_copy = next_ep;
             curr_level--;
         }
 
-        // Update the entry point if this node is at a higher level
+        // If this node’s level eclipses the entrypoint’s, update it
         if (random_level > _nodes[_entrypoint]->get_level())
             _entrypoint = idx;
 
-        // For levels that this node will exist in
-        
+        // Insert the node on all its levels down to 0
         while (curr_level >= 0)
         {
-            // Find the nearest neighbors at this level
-            std::vector<size_t> neighbors = _search_base_layer(vec, ep_copy, _config.CONSTRUCTION_EXPANSION_FACTOR, curr_level);
-            
-            // Add bidirectional connections
-            node_ptr->set_connections(curr_level, neighbors);
-            
-            // Add connections back to this node
-            for (size_t neighbor_id : neighbors)
+            // 1) efConstruction search at this level
+            std::vector<size_t> candidates =
+                _search_base_layer(stored, ep_copy, _config.CONSTRUCTION_EXPANSION_FACTOR, curr_level);
+
+            // 2) Diversified selection for the NEW node (cap links to M/M0)
+            const bool is_level0 = (curr_level == 0);
+            const size_t cap = is_level0 ? _config.M0 : _config.M;
+
+            std::vector<size_t> sel_u, pruned_u;
+            _select_neighbors_heuristic(
+                idx,
+                candidates,
+                curr_level,
+                cap,
+                /*extendCandidates=*/is_level0,
+                /*keepPrunedConnections=*/is_level0,
+                sel_u,
+                &pruned_u,
+                /*max_extension=*/32  // cap expansion at L0 to keep inserts fast (tune as needed)
+            );
+
+            // 3) Set the new node’s connections (bounded by cap)
+            node_ptr->set_connections(curr_level, sel_u);
+
+            // 4) Add reverse edges + re-prune each neighbor
+            for (size_t v : sel_u)
             {
-                // Validate neighbor ID
-                if (neighbor_id >= _nodes.size())
-                    continue;
+                if (v >= _nodes.size()) continue;
+                auto* nv = _nodes[v].get();
 
-                _nodes[neighbor_id]->add_connection(curr_level, idx);
+                // Bag = v's current neighbors at this level + u
+                std::vector<size_t> bag =
+                    (nv->get_connections().size() > static_cast<size_t>(curr_level))
+                    ? nv->get_connections()[curr_level]
+                    : std::vector<size_t>{};
+                bag.push_back(idx);
+
+                // Optional: skip dedup (diversified selection will ignore dups).
+                // If you really want to dedup:
+                // std::sort(bag.begin(), bag.end());
+                // bag.erase(std::unique(bag.begin(), bag.end()), bag.end());
+
+                auto new_v = _reselect_for_node(v, curr_level, bag, cap, is_level0);
+                nv->set_connections(curr_level, new_v);
             }
-            
-            // Ensure the graph is small-world by pruning connections
-            for (size_t neighbor_id : neighbors)
-                _prune_connections(neighbor_id, curr_level);
-            
-            // Update entry point for the next level down
-            ep_copy = neighbors;
-            
-            // Protection against infinite loop - break if we reach level 0
-            if (curr_level == 0)
-                break;
 
+            // (Optional) If you want extra stickiness at L0, you can link some of pruned_u -> u here,
+            // but it increases degree; most keep it off or very conservative.
+
+            // 5) Use the selected neighbors as entrypoints for the next lower level
+            ep_copy = sel_u;
+
+            if (curr_level == 0) break;
             curr_level--;
         }
     }
@@ -322,8 +349,125 @@ private:
     std::mt19937 _random_engine;
     // For generating node levels
     std::geometric_distribution<size_t> _level_generator;
+
+    // ---------- tiny private helpers (no public API changes) ----------
+    inline scalar _distance(size_t a_id, size_t b_id) const {
+        return _distance(_nodes[a_id]->get_vector(), _nodes[b_id]->get_vector());
+    }
+    inline scalar _distance(size_t a_id, const vector_type& b) const {
+        return _distance(_nodes[a_id]->get_vector(), b);
+    }
     
-    // Search at a specific level
+    // Diversified selection (no new public structs)
+    inline void _select_neighbors_heuristic(
+        size_t center_id,
+        const std::vector<size_t>& initial_candidates,
+        int level,
+        size_t maxM,
+        bool extendCandidates,
+        bool keepPrunedConnections,
+        std::vector<size_t>& out_selected,
+        std::vector<size_t>* out_pruned = nullptr,
+        size_t max_extension = 0
+    ) {
+        out_selected.clear();
+        if (out_pruned) out_pruned->clear();
+
+        // Build candidate set C (unique)
+        std::vector<size_t> C;
+        C.reserve(initial_candidates.size() * (extendCandidates ? 2 : 1));
+        std::unordered_set<size_t> seen;
+        seen.reserve(C.capacity() * 2);
+
+        auto push_unique = [&](size_t id) {
+            if (id != center_id && id < _nodes.size() && seen.insert(id).second)
+                C.push_back(id);
+        };
+        for (size_t id : initial_candidates) push_unique(id);
+
+        if (extendCandidates) {
+            size_t added = 0;
+            for (size_t cid : initial_candidates) {
+                if (cid >= _nodes.size()) continue;
+                const auto& conns = _nodes[cid]->get_connections();
+                if (level >= conns.size()) continue;
+                for (size_t nid : conns[level]) {
+                    if (max_extension && added >= max_extension) break;
+                    size_t before = seen.size();
+                    push_unique(nid);
+                    if (seen.size() != before) ++added;
+                }
+                if (max_extension && added >= max_extension) break;
+            }
+        }
+
+        if (C.empty()) return;
+
+        // Precompute d(center, *)
+        std::unordered_map<size_t, scalar> d_center;
+        d_center.reserve(C.size() * 2);
+        for (size_t id : C) {
+            d_center.emplace(id, _distance(center_id, id));
+        }
+
+        // Sort by increasing d(center, *)
+        std::sort(C.begin(), C.end(), [&](size_t a, size_t b){
+            return d_center[a] < d_center[b];
+        });
+
+        // Greedy diversified pick
+        out_selected.reserve(std::min(maxM, C.size()));
+        if (out_pruned) out_pruned->reserve(C.size());
+
+        for (size_t e_id : C) {
+            const scalar de = d_center[e_id];
+            bool ok = true;
+            for (size_t r_id : out_selected) {
+                scalar dr = _distance(e_id, r_id);
+                if (dr < de) { ok = false; break; }
+            }
+            if (ok) {
+                out_selected.push_back(e_id);
+                if (out_selected.size() == maxM) break;
+            } else if (keepPrunedConnections && out_pruned) {
+                out_pruned->push_back(e_id);
+            }
+        }
+
+        // Optional backfill if too few passed the diversification test
+        if (out_selected.size() < maxM) {
+            for (size_t e_id : C) {
+                if (out_selected.size() == maxM) break;
+                if (std::find(out_selected.begin(), out_selected.end(), e_id) == out_selected.end())
+                    out_selected.push_back(e_id);
+            }
+        }
+    }
+
+    inline std::vector<size_t> _reselect_for_node(
+        size_t node_id,
+        int level,
+        const std::vector<size_t>& bag,
+        size_t cap,
+        bool is_level0
+    ) {
+        std::vector<size_t> selected;
+        _select_neighbors_heuristic(
+            node_id,
+            bag,
+            level,
+            cap,
+            /*extendCandidates=*/is_level0,
+            /*keepPrunedConnections=*/false,
+            selected,
+            /*out_pruned=*/nullptr,
+            /*max_extension=*/0
+        );
+        return selected;
+    }
+    // -----------------------------------------------------------------
+
+    // Search at a specific level (fixed stopping condition)
     std::vector<size_t> _search_base_layer(
         const vector_type& query,
         const std::vector<size_t>& entrypoints,
@@ -331,190 +475,68 @@ private:
         size_t level
     ) const
     {
-        // Protection against empty entrypoints
-        if (entrypoints.empty())
-            return {};
-        
-        // Protection against empty index
-        if (_nodes.empty())
-            return {};
-        
-        // Ensure ef is at least 1
-        ef = std::max(size_t(1), ef);
-        
-        // Priority queue for the closest neighbors found so far (max heap)
-        std::priority_queue<neighbor<scalar>> result;
-        
-        // Priority queue for candidates to explore (min heap)
-        std::priority_queue<neighbor<scalar>, std::vector<neighbor<scalar>>, std::greater<>> candidates;
-        
-        // Set to track visited nodes
+        if (entrypoints.empty() || _nodes.empty()) return {};
+        ef = std::max<size_t>(1, ef);
+
+        // max-heap for results (W), min-heap for candidates (C)
+        std::priority_queue<neighbor<scalar>> W;
+        std::priority_queue<neighbor<scalar>, std::vector<neighbor<scalar>>, std::greater<>> C;
+
         std::vector<bool> visited(_nodes.size(), false);
-        
-        // Initialize with entrypoints
-        scalar furthest_dist = std::numeric_limits<scalar>::max();
+
+        // Seed from entrypoints
         for (size_t ep : entrypoints)
         {
-            // Validate index
-            if (ep >= _nodes.size())
-                continue;
-            
-            scalar dist = _distance(query, _nodes[ep]->get_vector());
-            candidates.emplace(ep, dist);
-            result.emplace(ep, dist);
+            if (ep >= _nodes.size()) continue;
+            scalar d = _distance(query, _nodes[ep]->get_vector());
+            W.emplace(ep, d);
+            C.emplace(ep, d);
             visited[ep] = true;
-            
-            if (result.size() > ef)
-                result.pop();
-            
-            if (!result.empty())
-                furthest_dist = result.top()._distance;
+            if (W.size() > ef) W.pop();
         }
-        
-        // Maximum iterations to prevent infinite loop
-        const size_t max_iterations = _nodes.size() * 2;
-        size_t iterations = 0;
 
-        size_t considered = 0;
-        
-        // Main search loop
-        while (!candidates.empty() && iterations < max_iterations)
+        auto worst = [&]() -> scalar {
+            return W.empty() ? std::numeric_limits<scalar>::max() : W.top()._distance;
+        };
+
+        // Standard HNSW loop: pop best candidate; stop when it is worse than worst in W
+        while (!C.empty())
         {
-            iterations++;
-            
-            neighbor<scalar> current = candidates.top();
-            candidates.pop();
-            
-            // Stop if we've found enough closer neighbors
-            if (current._distance > furthest_dist && considered > ef)
-                break;
-            
-            // Explore neighbors of current node
-            const auto& connections = _nodes[current._id]->get_connections();
-            // Skip if this node doesn't have connections at this level
-            if (level >= connections.size())
-                continue;
-            
-            const auto& level_connections = connections[level];
-            for (size_t neighbor_id : level_connections)
+            auto curr = C.top(); C.pop();
+            if (curr._distance > worst()) break; // <-- KEY: proper stopping rule
+
+            const auto& conns = _nodes[curr._id]->get_connections();
+            if (level >= conns.size()) continue;
+
+            for (size_t nb : conns[level])
             {
-                ++considered;
+                if (nb >= _nodes.size()) continue;
+                if (visited[nb]) continue;
+                visited[nb] = true;
 
-                // Validate index
-                if (neighbor_id >= _nodes.size())
-                    continue;
-
-                if (!visited[neighbor_id])
+                scalar d = _distance(query, _nodes[nb]->get_vector());
+                if (W.size() < ef || d < worst())
                 {
-                    visited[neighbor_id] = true;
-                    
-                    scalar dist = _distance(query, _nodes[neighbor_id]->get_vector());
-                    
-                    // Add to results if distance is small enough
-                    if (dist < furthest_dist || result.size() < ef)
-                    {
-                        candidates.emplace(neighbor_id, dist);
-                        result.emplace(neighbor_id, dist);
-                        
-                        if (result.size() > ef)
-                            result.pop();
-                        
-                        if (!result.empty())
-                            furthest_dist = result.top()._distance;
-                    }
+                    C.emplace(nb, d);
+                    W.emplace(nb, d);
+                    if (W.size() > ef) W.pop();
                 }
             }
         }
 
-        // Convert results to vector of IDs (reverse order since priority_queue is max-heap)
-        std::vector<size_t> result_ids;
-        std::vector<neighbor<scalar>> temp_results;
-        
-        while (!result.empty())
-        {
-            temp_results.push_back(result.top());
-            result.pop();
-        }
-        
-        // Sort by distance (ascending) and extract IDs
-        std::sort(temp_results.begin(), temp_results.end());
-        for (const auto& n : temp_results)
-            result_ids.push_back(n._id);
-        
-        return result_ids;
+        // Dump W to sorted vector (ascending distance)
+        std::vector<neighbor<scalar>> tmp;
+        while (!W.empty()) { tmp.push_back(W.top()); W.pop(); }
+        std::sort(tmp.begin(), tmp.end());
+        std::vector<size_t> ids;
+        ids.reserve(tmp.size());
+        for (auto& n : tmp) ids.push_back(n._id);
+        return ids;
     }
     
-    // Prune connections to maintain small-world property
-    void _prune_connections(size_t node_id, size_t level)
-    {
-        // Check if node_id is valid
-        if (node_id >= _nodes.size())
-            return;
-        
-        auto& node = _nodes[node_id];
-        
-        // Check if node has connections at this level
-        if (level >= node->_connections.size())
-            return;
-        
-        auto& connections = node->_connections[level];
-        
-        // Use M0 for level 0, M for higher levels
-        size_t max_connections = (level == 0) ? _config.M0 : _config.M;
-        
-        if (connections.size() <= max_connections)
-            return;
-        
-        // Calculate distances from this node to all connections
-        std::vector<neighbor<scalar>> neighbors;
-        for (size_t i = 0; i < connections.size(); ++i)
-        {
-            size_t neighbor_id = connections[i];
-            
-            // Skip invalid indices
-            if (neighbor_id >= _nodes.size())
-                continue;
-            
-            scalar dist = _distance(node->get_vector(), _nodes[neighbor_id]->get_vector());
-            neighbors.emplace_back(neighbor_id, dist);
-        }
-        
-        // Sort by distance
-        std::sort(neighbors.begin(), neighbors.end());
-        
-        // Keep 70% closest connections and 30% farthest connections
-        connections.clear();
-        
-        if (neighbors.size() <= max_connections)
-        {
-            // If we have fewer neighbors than max_connections, keep all
-            for (const auto& neighbor : neighbors)
-                connections.push_back(neighbor._id);
-        }
-        else
-        {
-            // Calculate how many close vs far connections to keep
-            size_t close_count = static_cast<size_t>(max_connections * 0.7);
-            size_t far_count = max_connections - close_count;
-            
-            // Ensure we have at least 1 close connection
-            if (close_count == 0)
-            {
-                close_count = 1;
-                far_count = max_connections - 1;
-            }
-            
-            // Keep closest neighbors
-            for (size_t i = 0; i < close_count && i < neighbors.size(); ++i)
-                connections.push_back(neighbors[i]._id);
-            
-            // Keep some of the farthest neighbors for long-range connectivity
-            size_t start_far = neighbors.size() - far_count;
-            for (size_t i = start_far; i < neighbors.size() && connections.size() < max_connections; ++i)
-                connections.push_back(neighbors[i]._id);
-        }
-    }
-    
+    // NOTE: Old 70/30 pruning removed in favor of diversified selection during insertion.
+    // (Keeping a stub here would be misleading, so it's gone.)
+
     // Calculate distance between two vectors based on the chosen metric
     scalar _distance(const vector_type& a, const vector_type& b) const
     {
@@ -532,23 +554,8 @@ private:
     // Cosine distance (1 - cosine similarity) with numerical stability
     scalar _cosine_distance(const vector_type& a, const vector_type& b) const
     {
-        scalar dot = a.dot(b);
-        scalar norm_a = a.norm();
-        scalar norm_b = b.norm();
-        
-        // Handle zero or very small vectors
-        const scalar epsilon = std::numeric_limits<scalar>::epsilon();
-        if (norm_a < epsilon || norm_b < epsilon)
-            return scalar(2.0);  // Maximum cosine distance
-        
-        // Compute cosine similarity
-        scalar cosine_sim = dot / (norm_a * norm_b);
-        
-        // Clamp to [-1, 1] to handle numerical errors
-        cosine_sim = std::max(scalar(-1.0), std::min(scalar(1.0), cosine_sim));
-        
-        // Return cosine distance [0, 2]
-        return scalar(1.0) - cosine_sim;
+        // Vectors are pre-normalized
+        return scalar(1.0) - a.dot(b);
     }
 };
 
