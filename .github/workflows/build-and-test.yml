@@ -217,17 +217,7 @@ jobs:
         for wheel in dist/*.whl; do
           if [ -f "$wheel" ]; then
             echo "Testing $wheel..."
-            python -c "
-import zipfile
-import sys
-try:
-    with zipfile.ZipFile('$wheel', 'r') as z:
-        z.testzip()
-    print('✓ ZIP integrity OK')
-except Exception as e:
-    print('✗ ZIP corruption detected:', e)
-    sys.exit(1)
-" || echo "FAILED: $wheel is corrupted"
+            python -c "import zipfile; import sys; z = zipfile.ZipFile('$wheel', 'r'); z.testzip(); z.close(); print('✓ ZIP integrity OK')" || echo "FAILED: $wheel is corrupted"
           fi
         done
         echo "Running twine check..."
