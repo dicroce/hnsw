@@ -149,11 +149,19 @@ jobs:
       run: |
         python -m pip install --upgrade pip wheel twine
         python -m twine check ./wheelhouse/*.whl
-        # Test that wheels can be opened as zip files
-        for wheel in ./wheelhouse/*.whl; do
-          echo "Testing wheel: $wheel"
-          python -c "import zipfile; zipfile.ZipFile('$wheel').testzip()" || echo "CORRUPTED: $wheel"
-        done
+        python -c "
+import glob
+import zipfile
+import os
+for wheel_path in glob.glob('./wheelhouse/*.whl'):
+    print(f'Testing wheel: {wheel_path}')
+    try:
+        with zipfile.ZipFile(wheel_path, 'r') as z:
+            z.testzip()
+        print('✓ ZIP integrity OK')
+    except Exception as e:
+        print(f'✗ CORRUPTED: {wheel_path} - {e}')
+"
 
     - uses: actions/upload-artifact@v4
       with:
@@ -213,12 +221,21 @@ jobs:
       run: |
         echo "=== Testing wheel integrity ==="
         python -m pip install --upgrade twine
-        for wheel in dist/*.whl; do
-          if [ -f "$wheel" ]; then
-            echo "Testing $wheel..."
-            python -c "import zipfile; import sys; z = zipfile.ZipFile('$wheel', 'r'); z.testzip(); z.close(); print('✓ ZIP integrity OK')" || echo "FAILED: $wheel is corrupted"
-          fi
-        done
+        python -c "
+import glob
+import zipfile
+import os
+print('Testing wheel integrity...')
+for wheel_path in glob.glob('dist/*.whl'):
+    print(f'Testing {wheel_path}...')
+    try:
+        with zipfile.ZipFile(wheel_path, 'r') as z:
+            z.testzip()
+        print('✓ ZIP integrity OK')
+    except Exception as e:
+        print(f'✗ ZIP corruption detected: {e}')
+        exit(1)
+"
         echo "Running twine check..."
         python -m twine check dist/*.whl dist/*.tar.gz || true
     
