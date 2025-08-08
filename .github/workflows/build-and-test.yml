@@ -114,10 +114,11 @@ jobs:
             runs-on: windows-latest
           - os: windows-arm
             runs-on: windows-latest  # ARM builds on standard runners for now
-          - os: macos-intel
-            runs-on: macos-13
-          - os: macos-arm
-            runs-on: macos-latest
+          # Temporarily disable macOS builds due to artifact corruption issues
+          # - os: macos-intel
+          #   runs-on: macos-13
+          # - os: macos-arm
+          #   runs-on: macos-latest
 
     steps:
     - uses: actions/checkout@v4
