@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "pybind11>=2.6.0", "numpy>=1.19.0"]
+requires = ["setuptools>=42", "wheel", "setuptools-scm", "pybind11>=2.6.0", "numpy>=1.19.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyhnsw"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Python bindings for HNSW (Hierarchical Navigable Small World) vector search"
 readme = "README.md"
 requires-python = ">=3.7"
@@ -24,3 +24,7 @@ test = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+root = "../.."
+fallback_version = "0.0.0+unknown"

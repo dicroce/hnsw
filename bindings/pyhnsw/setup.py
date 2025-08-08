@@ -84,7 +84,6 @@ if os.path.exists(readme_path):
 
 setup(
     name="pyhnsw",
-    version="0.1.0",
     author="Your Name",
     author_email="your.email@example.com",
     description="Python bindings for HNSW (Hierarchical Navigable Small World) vector search",
