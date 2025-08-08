@@ -31,17 +31,33 @@ if eigen_include is None:
     temp_dir = tempfile.mkdtemp()
     eigen_include = os.path.join(temp_dir, "eigen")
     
-    # Download and extract Eigen
+    # Download and extract Eigen with better error handling
     try:
-        subprocess.run([
+        print("Downloading Eigen...")
+        result = subprocess.run([
             "git", "clone", "--depth", "1", "--branch", "3.4.0",
             "https://gitlab.com/libeigen/eigen.git", eigen_include
-        ], check=True, capture_output=True)
-        print(f"Downloaded Eigen to {eigen_include}")
-    except subprocess.CalledProcessError:
-        # Last resort: use empty path and hope system has it
-        eigen_include = ""
-        print("Warning: Could not locate or download Eigen. Hoping system has it in standard paths.")
+        ], check=True, capture_output=True, text=True, timeout=300)
+        print(f"Successfully downloaded Eigen to {eigen_include}")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        print(f"Failed to download Eigen: {e}")
+        # Try alternative: download as tarball
+        try:
+            import urllib.request
+            import tarfile
+            print("Trying alternative download method...")
+            tarball_url = "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz"
+            tarball_path = os.path.join(temp_dir, "eigen.tar.gz")
+            urllib.request.urlretrieve(tarball_url, tarball_path)
+            with tarfile.open(tarball_path, 'r:gz') as tar:
+                tar.extractall(temp_dir)
+            eigen_include = os.path.join(temp_dir, "eigen-3.4.0")
+            print(f"Successfully downloaded Eigen tarball to {eigen_include}")
+        except Exception as e2:
+            print(f"Alternative download also failed: {e2}")
+            # Last resort: use empty path and hope system has it
+            eigen_include = ""
+            print("Warning: Could not locate or download Eigen. Hoping system has it in standard paths.")
 
 ext_modules = [
     Pybind11Extension(

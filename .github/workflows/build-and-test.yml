@@ -137,12 +137,24 @@ jobs:
         CIBW_ARCHS_LINUX: auto64
         CIBW_ARCHS_WINDOWS: auto64
         CIBW_ARCHS_MACOS: "x86_64 arm64"
-        # Ensure git is available for Eigen download (setup.py will fetch Eigen if needed)
-        CIBW_BEFORE_ALL_LINUX: "yum install -y git || true"
-        CIBW_BEFORE_ALL_MACOS: ""
+        # Ensure git is available for Eigen download and pre-fetch Eigen
+        CIBW_BEFORE_ALL_LINUX: "yum install -y git || apt-get update && apt-get install -y git || true"
+        CIBW_BEFORE_ALL_MACOS: "brew install git || true"
         CIBW_BEFORE_ALL_WINDOWS: ""
+        # Increase build verbosity for debugging
+        CIBW_BUILD_VERBOSITY: 2
       with:
         package-dir: bindings/pyhnsw
+    
+    - name: Verify wheel integrity
+      run: |
+        python -m pip install --upgrade pip wheel twine
+        python -m twine check ./wheelhouse/*.whl
+        # Test that wheels can be opened as zip files
+        for wheel in ./wheelhouse/*.whl; do
+          echo "Testing wheel: $wheel"
+          python -c "import zipfile; zipfile.ZipFile('$wheel').testzip()" || echo "CORRUPTED: $wheel"
+        done
 
     - uses: actions/upload-artifact@v4
       with:
@@ -183,8 +195,43 @@ jobs:
         path: dist
         merge-multiple: true
     
-    - name: List downloaded artifacts
-      run: find dist -type f -name "*.whl" -o -name "*.tar.gz" | sort
+    - name: Debug downloaded artifacts
+      run: |
+        echo "=== Artifact directory structure ==="
+        find dist -type f -ls
+        echo -e "\n=== Wheel file details ==="
+        for wheel in dist/*.whl; do
+          if [ -f "$wheel" ]; then
+            echo "File: $wheel"
+            echo "Size: $(stat -c%s "$wheel") bytes"
+            echo "MD5: $(md5sum "$wheel")"
+            echo "First 16 bytes: $(xxd -l 16 "$wheel")"
+            echo "---"
+          fi
+        done
+    
+    - name: Validate wheels before upload
+      run: |
+        echo "=== Testing wheel integrity ==="
+        python -m pip install --upgrade twine
+        for wheel in dist/*.whl; do
+          if [ -f "$wheel" ]; then
+            echo "Testing $wheel..."
+            python -c "
+import zipfile
+import sys
+try:
+    with zipfile.ZipFile('$wheel', 'r') as z:
+        z.testzip()
+    print('✓ ZIP integrity OK')
+except Exception as e:
+    print('✗ ZIP corruption detected:', e)
+    sys.exit(1)
+" || echo "FAILED: $wheel is corrupted"
+          fi
+        done
+        echo "Running twine check..."
+        python -m twine check dist/*.whl dist/*.tar.gz || true
     
     - uses: pypa/gh-action-pypi-publish@release/v1
       with:
