@@ -26,4 +26,5 @@ target_include_directories(
     ${eigen_SOURCE_DIR}
 )
 
+enable_testing()
 add_subdirectory(ut)

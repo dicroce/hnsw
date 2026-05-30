@@ -214,11 +214,6 @@ int main( int argc, char* argv[] )
         printf("\nSuccess.\n");
     else printf("\nFailure.\n");
 
-    if(something_failed)
-        if(system("/bin/bash -c 'read -p \"Press Any Key\"'") < 0)
-        {
-            printf("system() failure.\n");
-        }
-
-    return 0;
+    // Return a non-zero exit code on failure so ctest / CI can detect it.
+    return something_failed ? 1 : 0;
 }

@@ -23,29 +23,43 @@ the value OR it finds the closest value on level 0 and the K nearest nodes seen 
 
 ### Example
 
-```
-#include "hnsw/hsnw.h"
+Vectors are passed as `Eigen::VectorX<scalar>` (e.g. `Eigen::VectorXf`), which
+is aliased as `dicroce::hnsw_types<float>::vector_type`.
 
-int main(int argc, char* argv[])
+```cpp
+#include "hnsw/hnsw.h"
+#include <Eigen/Dense>
+#include <random>
+#include <cstdio>
+
+int main()
 {
+    using vector_type = dicroce::hnsw_types<float>::vector_type;
+
     // Create an index for 128-dimensional vectors
-    dicroce::hnsw<float> index(128);
-        
+    const size_t dim = 128;
+    dicroce::hnsw<float> index(dim);
+
+    std::mt19937 gen(42);
+    std::normal_distribution<float> nd(0.0f, 1.0f);
+    auto random_vec = [&]() {
+        vector_type v(dim);
+        for (size_t i = 0; i < dim; ++i) v[i] = nd(gen);
+        return v;
+    };
+
+    // Build the index
     const size_t num_vectors = 10000;
-    std::vector<std::vector<float>> vectors(num_vectors) = generate_random_vv(num_vectors, 128);
-    
-    // Build the index    
-    for (size_t i = 0; i < vectors.size(); ++i)
-        index.add_item(vectors[i]);
-    
-    // Search for nearest neighbors
-    std::vector<float> query(128) = generate_random_v(128);
-    
+    for (size_t i = 0; i < num_vectors; ++i)
+        index.add_item(random_vec());
+
+    // Search for the k nearest neighbors of a query vector
+    vector_type query = random_vec();
     const size_t k = 10;
     auto results = index.search(query, k);
-    
+
     for (const auto& result : results)
-        printf("ID: %lu, Distance: %f\n", result.first, result.second);
+        printf("ID: %zu, Distance: %f\n", result.first, result.second);
 }
 ```
 

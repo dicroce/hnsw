@@ -109,7 +109,7 @@ public:
                 (*i).passed = false;
             }
 
-            printf("[%s] %-50s\n",(_something_failed)?"F":"P",(*i).test_name.c_str());
+            printf("[%s] %-50s\n",(i->passed)?"P":"F",(*i).test_name.c_str());
 
             teardown();
         }
