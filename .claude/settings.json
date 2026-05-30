@@ -3,7 +3,8 @@
     "allow": [
       "PowerShell($env:CC=\"clang\"; $env:CXX=\"clang++\"; cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release -S . 2>&1 | Select-Object -Last 30)",
       "Bash(git checkout *)",
-      "PowerShell(& clang++ -std=c++17 -O2 -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DIS_WINDOWS -I include -I ut/include -I build/_deps/eigen-src ut/source/framework.cpp ut/source/test_hnsw.cpp -o ut_test.exe; if\\($?\\){ \"BUILD OK\"; & .\\\\ut_test.exe; \"exit code: $LASTEXITCODE\" })"
+      "PowerShell(& clang++ -std=c++17 -O2 -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DIS_WINDOWS -I include -I ut/include -I build/_deps/eigen-src ut/source/framework.cpp ut/source/test_hnsw.cpp -o ut_test.exe; if\\($?\\){ \"BUILD OK\"; & .\\\\ut_test.exe; \"exit code: $LASTEXITCODE\" })",
+      "PowerShell(if\\(-not \\(Test-Path build/_deps/eigen-src/Eigen/Dense\\)\\){ cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -S . 2>&1 | Out-Null }; & clang++ -std=c++17 -O2 -DNDEBUG -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DIS_WINDOWS -I include -I ut/include -I build/_deps/eigen-src ut/source/framework.cpp ut/source/test_hnsw.cpp -o ut_test.exe; if\\($?\\){ \"BUILD OK\"; & .\\\\ut_test.exe; \"exit code: $LASTEXITCODE\" })"
     ]
   }
 }

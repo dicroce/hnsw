@@ -63,5 +63,25 @@ int main()
 }
 ```
 
+### Persistence
+
+The whole graph (vectors *and* connections) is serialized to a flat binary
+file, so loading reconstructs a ready-to-search index **without rebuilding** —
+construction is the expensive part of HNSW, so you only pay it once.
+
+```cpp
+// Save a built index.
+index.save("index.bin");
+
+// Load it back later (returns a ready-to-search index; no rebuild).
+auto index = dicroce::hnsw<float>::load("index.bin");
+auto results = index.search(query, 10);
+```
+
+The on-disk format is self-describing (magic + version + byte-order marker) and
+records the `sizeof(scalar)`, so loading a file written for `hnsw<double>` into
+an `hnsw<float>` — or a file written on a different-endian machine — fails
+loudly instead of corrupting silently.
+
 ### Compilation
 mkdir build && pushd build && cmake .. && make && popd

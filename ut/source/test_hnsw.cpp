@@ -6,6 +6,7 @@
 #include <vector>
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 
 using namespace std;
 using namespace dicroce;
@@ -213,5 +214,79 @@ void test_hnsw::test_edge_cases()
         vector_type wrong(4); wrong.setZero();
         RTF_ASSERT_THROWS(index.add_item(wrong), std::invalid_argument);
         RTF_ASSERT_THROWS(index.search(wrong, 1), std::invalid_argument);
+    }
+}
+
+void test_hnsw::test_save_load()
+{
+    const size_t dim = 48, n = 1500, n_queries = 50, k = 10;
+    const char* path = "hnsw_save_load_test.bin";
+
+    std::mt19937 gen(123);
+    std::vector<vector_type> data(n), queries(n_queries);
+    for (auto& v : data)    v = random_vector(gen, dim);
+    for (auto& q : queries) q = random_vector(gen, dim);
+
+    // Build an index with non-default config so we verify config round-trips too.
+    hnsw_config cfg;
+    cfg.M = 12; cfg.M0 = 24; cfg.CONSTRUCTION_EXPANSION_FACTOR = 150; cfg.SEARCH_EXPANSION_FACTOR = 80;
+    hnsw<float> original(dim, cfg);
+    for (auto& v : data)
+        original.add_item(v);
+
+    // Capture the original's answers before saving.
+    std::vector<std::vector<std::pair<size_t, float>>> before;
+    for (const auto& q : queries)
+        before.push_back(original.search(q, k));
+
+    original.save(path);
+
+    // Reload into a fresh index (no rebuild) and sanity-check metadata.
+    hnsw<float> loaded = hnsw<float>::load(path);
+    std::remove(path);
+
+    RTF_ASSERT_EQUAL(loaded.size(), original.size());
+    RTF_ASSERT_EQUAL(loaded.dim(), dim);
+
+    // The loaded index must answer IDENTICALLY to the in-memory one: same graph,
+    // same vectors => same search results (ids and distances).
+    for (size_t qi = 0; qi < queries.size(); ++qi)
+    {
+        auto after = loaded.search(queries[qi], k);
+        RTF_ASSERT_EQUAL(after.size(), before[qi].size());
+        for (size_t i = 0; i < after.size(); ++i)
+        {
+            RTF_ASSERT_EQUAL(after[i].first, before[qi][i].first);
+            RTF_ASSERT(std::fabs(after[i].second - before[qi][i].second) < 1e-5f);
+        }
+    }
+
+    // And recall against brute force must survive the round-trip.
+    double recall_sum = 0.0;
+    for (const auto& q : queries)
+    {
+        auto exact = exact_neighbors(data, q, k);
+        auto approx = loaded.search(q, k);
+        size_t hits = 0;
+        for (const auto& r : approx)
+            if (std::find(exact.begin(), exact.end(), r.first) != exact.end())
+                ++hits;
+        recall_sum += static_cast<double>(hits) / k;
+    }
+    double recall = recall_sum / n_queries;
+    printf("Recall@%zu after reload = %.3f\n", k, recall);
+    RTF_ASSERT(recall >= 0.90);
+
+    // A bad-magic file must be rejected, not silently accepted.
+    {
+        FILE* f = std::fopen("hnsw_bad_index.bin", "wb");
+        const char junk[16] = "not an index!!";
+        std::fwrite(junk, 1, sizeof(junk), f);
+        std::fclose(f);
+        bool threw = false;
+        try { hnsw<float>::load("hnsw_bad_index.bin"); }
+        catch (const std::exception&) { threw = true; }
+        std::remove("hnsw_bad_index.bin");
+        RTF_ASSERT(threw);
     }
 }

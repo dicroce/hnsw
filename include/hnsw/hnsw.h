@@ -10,6 +10,9 @@
 #include <limits>
 #include <unordered_map>
 #include <stdexcept>
+#include <fstream>
+#include <string>
+#include <cstdint>
 
 #include <cmath>
 
@@ -249,26 +252,36 @@ public:
             // 3) Set the new node’s connections (bounded by cap)
             node_ptr->set_connections(curr_level, sel_u);
 
-            // 4) Add reverse edges + re-prune each neighbor
+            // 4) Add reverse edges + re-prune each neighbor.
+            //    Standard HNSW shrink step: append u to v's neighbor list, and
+            //    only re-run the selection heuristic when v is now over capacity.
+            //    The cheap append-when-under-cap fast path avoids paying the
+            //    O(C^2) heuristic on the common case.
             for (size_t v : sel_u)
             {
                 if (v >= _nodes.size()) continue;
                 auto* nv = _nodes[v].get();
 
-                // Bag = v's current neighbors at this level + u
+                // v's current neighbors at this level.
                 std::vector<size_t> bag =
                     (nv->get_connections().size() > static_cast<size_t>(curr_level))
                     ? nv->get_connections()[curr_level]
                     : std::vector<size_t>{};
-                bag.push_back(idx);
 
-                // Optional: skip dedup (diversified selection will ignore dups).
-                // If you really want to dedup:
-                // std::sort(bag.begin(), bag.end());
-                // bag.erase(std::unique(bag.begin(), bag.end()), bag.end());
-
-                auto new_v = _reselect_for_node(v, curr_level, bag, cap, is_level0);
-                nv->set_connections(curr_level, new_v);
+                if (bag.size() < cap)
+                {
+                    // Under capacity: just add the reverse edge, no heuristic.
+                    nv->add_connection(curr_level, idx);
+                }
+                else
+                {
+                    // Over capacity: re-select v's best `cap` neighbors from its
+                    // existing links plus u. No candidate extension here -- the
+                    // shrink operates only on v's own connection set.
+                    bag.push_back(idx);
+                    auto new_v = _reselect_for_node(v, curr_level, bag, cap);
+                    nv->set_connections(curr_level, new_v);
+                }
             }
 
             // (Optional) If you want extra stickiness at L0, you can link some of pruned_u -> u here,
@@ -350,8 +363,170 @@ public:
     {
         return _dim;
     }
-    
+
+    // --------------------------- persistence ---------------------------
+    //
+    // Flat, self-describing binary snapshot. The whole graph (vectors AND
+    // adjacency) is written, so load() reconstructs a ready-to-search index
+    // WITHOUT rebuilding -- construction is the expensive part of HNSW, and
+    // the point of persistence is to pay it only once.
+    //
+    // Layout (sequential, fixed-width integers for 32/64-bit portability):
+    //   magic[8]="HNSWIDX\0", u32 version, u32 byte_order_mark, u32 sizeof(scalar), u32 flags
+    //   u64 dim
+    //   config: u64 M, u64 M0, u64 efC, u64 efS, f32 norm_factor, u64 max_level, u32 metric
+    //   u64 entrypoint, u64 current_max_level, u64 node_count
+    //   per node: u64 level, scalar[dim] vector, then for L in [0,level]: u64 cnt, u64 ids[cnt]
+    //
+    // Node id == position in the file (insertion order), so ids are implicit.
+    // The byte_order_mark lets load() reject a file written on a machine with
+    // different endianness rather than silently corrupting. The layout is kept
+    // sequential and self-describing so a future zero-copy mmap loader is
+    // straightforward to add.
+    void save(const std::string& path) const
+    {
+        std::ofstream os(path, std::ios::binary | std::ios::trunc);
+        if (!os)
+            throw std::runtime_error("hnsw::save: cannot open file for writing: " + path);
+
+        auto put = [&](const auto& v) {
+            os.write(reinterpret_cast<const char*>(&v), sizeof(v));
+        };
+        auto put_u64 = [&](uint64_t v) { put(v); };
+
+        const char magic[8] = {'H','N','S','W','I','D','X','\0'};
+        os.write(magic, 8);
+        put(static_cast<uint32_t>(FORMAT_VERSION));
+        put(static_cast<uint32_t>(BYTE_ORDER_MARK));
+        put(static_cast<uint32_t>(sizeof(scalar)));
+        put(static_cast<uint32_t>(0)); // flags (reserved)
+
+        put_u64(_dim);
+        put_u64(_config.M);
+        put_u64(_config.M0);
+        put_u64(_config.CONSTRUCTION_EXPANSION_FACTOR);
+        put_u64(_config.SEARCH_EXPANSION_FACTOR);
+        put(static_cast<float>(_config.NORMALIZATION_FACTOR));
+        put_u64(_config.MAX_LEVEL);
+        put(static_cast<uint32_t>(_config.METRIC));
+
+        put_u64(_entrypoint);
+        put_u64(_current_max_level);
+        put_u64(_nodes.size());
+
+        for (const auto& node : _nodes)
+        {
+            const uint64_t level = node->get_level();
+            put_u64(level);
+
+            const vector_type& vec = node->get_vector();
+            os.write(reinterpret_cast<const char*>(vec.data()),
+                     static_cast<std::streamsize>(_dim * sizeof(scalar)));
+
+            const auto& conns = node->get_connections();
+            for (uint64_t L = 0; L <= level; ++L)
+            {
+                if (L < conns.size())
+                {
+                    put_u64(conns[L].size());
+                    for (size_t id : conns[L]) put_u64(static_cast<uint64_t>(id));
+                }
+                else
+                {
+                    put_u64(0);
+                }
+            }
+        }
+
+        if (!os)
+            throw std::runtime_error("hnsw::save: write failed for: " + path);
+    }
+
+    // Load a previously saved index. Returns a ready-to-search index; no graph
+    // reconstruction is performed.
+    static hnsw<scalar> load(const std::string& path)
+    {
+        std::ifstream is(path, std::ios::binary);
+        if (!is)
+            throw std::runtime_error("hnsw::load: cannot open file for reading: " + path);
+
+        auto get = [&](auto& v) {
+            is.read(reinterpret_cast<char*>(&v), sizeof(v));
+            if (!is)
+                throw std::runtime_error("hnsw::load: unexpected end of file: " + path);
+        };
+        auto get_u64 = [&]() { uint64_t v; get(v); return v; };
+
+        char magic[8];
+        is.read(magic, 8);
+        const char expected[8] = {'H','N','S','W','I','D','X','\0'};
+        for (int i = 0; i < 8; ++i)
+            if (!is || magic[i] != expected[i])
+                throw std::runtime_error("hnsw::load: bad magic (not an hnsw index): " + path);
+
+        uint32_t version = 0, bom = 0, scalar_size = 0, flags = 0;
+        get(version); get(bom); get(scalar_size); get(flags);
+        if (version != FORMAT_VERSION)
+            throw std::runtime_error("hnsw::load: unsupported format version");
+        if (bom != BYTE_ORDER_MARK)
+            throw std::runtime_error("hnsw::load: endianness mismatch (file written on a different platform)");
+        if (scalar_size != sizeof(scalar))
+            throw std::runtime_error("hnsw::load: scalar type size mismatch (float vs double?)");
+
+        const uint64_t dim = get_u64();
+
+        hnsw_config cfg;
+        cfg.M = static_cast<size_t>(get_u64());
+        cfg.M0 = static_cast<size_t>(get_u64());
+        cfg.CONSTRUCTION_EXPANSION_FACTOR = static_cast<size_t>(get_u64());
+        cfg.SEARCH_EXPANSION_FACTOR = static_cast<size_t>(get_u64());
+        float norm_factor = 0.0f; get(norm_factor); cfg.NORMALIZATION_FACTOR = norm_factor;
+        cfg.MAX_LEVEL = static_cast<size_t>(get_u64());
+        uint32_t metric = 0; get(metric);
+        cfg.METRIC = static_cast<hnsw_config::distance_metric>(metric);
+
+        hnsw<scalar> idx(static_cast<size_t>(dim), cfg);
+
+        idx._entrypoint = static_cast<size_t>(get_u64());
+        idx._current_max_level = static_cast<size_t>(get_u64());
+        const uint64_t node_count = get_u64();
+
+        idx._nodes.reserve(static_cast<size_t>(node_count));
+        for (uint64_t i = 0; i < node_count; ++i)
+        {
+            const uint64_t level = get_u64();
+
+            vector_type vec(static_cast<Eigen::Index>(dim));
+            is.read(reinterpret_cast<char*>(vec.data()),
+                    static_cast<std::streamsize>(dim * sizeof(scalar)));
+            if (!is)
+                throw std::runtime_error("hnsw::load: truncated vector data: " + path);
+
+            auto node = std::make_unique<hnsw_node<scalar>>(
+                vec, static_cast<size_t>(i), static_cast<size_t>(level));
+
+            for (uint64_t L = 0; L <= level; ++L)
+            {
+                const uint64_t cnt = get_u64();
+                std::vector<size_t> ids;
+                ids.reserve(static_cast<size_t>(cnt));
+                for (uint64_t c = 0; c < cnt; ++c)
+                    ids.push_back(static_cast<size_t>(get_u64()));
+                node->set_connections(static_cast<size_t>(L), ids);
+            }
+
+            idx._nodes.push_back(std::move(node));
+        }
+
+        return idx;
+    }
+    // -------------------------------------------------------------------
+
 private:
+    // On-disk format constants.
+    static constexpr uint32_t FORMAT_VERSION = 1;
+    static constexpr uint32_t BYTE_ORDER_MARK = 0x01020304u;
+
     // Dimension of vectors
     size_t _dim;
     // Configuration parameters
@@ -465,8 +640,7 @@ private:
         size_t node_id,
         int level,
         const std::vector<size_t>& bag,
-        size_t cap,
-        bool is_level0
+        size_t cap
     ) {
         std::vector<size_t> selected;
         _select_neighbors_heuristic(
@@ -474,7 +648,7 @@ private:
             bag,
             level,
             cap,
-            /*extendCandidates=*/is_level0,
+            /*extendCandidates=*/false,   // shrink never extends: candidate set is v's own links
             /*keepPrunedConnections=*/false,
             selected,
             /*out_pruned=*/nullptr,
