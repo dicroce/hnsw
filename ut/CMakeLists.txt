@@ -16,3 +16,5 @@ target_link_libraries(
     ut PUBLIC
     hnsw
 )
+
+add_test(NAME ut COMMAND ut)

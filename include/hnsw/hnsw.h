@@ -7,8 +7,9 @@
 #include <queue>
 #include <unordered_set>
 #include <memory>
-#include <chrono>
 #include <limits>
+#include <unordered_map>
+#include <stdexcept>
 
 #include <cmath>
 
@@ -289,25 +290,41 @@ public:
         
         if (_nodes.empty())
             return {};
-        
+
+        // Stored vectors are normalized once for COSINE; normalize the query to
+        // match so the returned distances are true cosine distances in [0, 2].
+        // (Ranking is unaffected by query scale, but the distance values are.)
+        const vector_type* qptr = &query;
+        vector_type query_normalized;
+        if (_config.METRIC == hnsw_config::distance_metric::COSINE)
+        {
+            scalar n = query.norm();
+            if (n > std::numeric_limits<scalar>::epsilon())
+            {
+                query_normalized = query / n;
+                qptr = &query_normalized;
+            }
+        }
+        const vector_type& q = *qptr;
+
         std::vector<size_t> entrypoints{_entrypoint};
         size_t curr_level = _current_max_level;
-        
+
         // Traverse the graph from top level down to level 1
         while (curr_level > 0)
         {
-            entrypoints = _search_base_layer(query, entrypoints, 1, curr_level);
+            entrypoints = _search_base_layer(q, entrypoints, 1, curr_level);
             curr_level--;
         }
-        
+
         // Do the final search at the bottom layer with ef_search
-        std::vector<size_t> results = _search_base_layer(query, entrypoints, _config.SEARCH_EXPANSION_FACTOR, 0);
-        
+        std::vector<size_t> results = _search_base_layer(q, entrypoints, _config.SEARCH_EXPANSION_FACTOR, 0);
+
         // Calculate distances for the results
         std::vector<neighbor<scalar>> candidates;
         for (size_t id : results)
         {
-            scalar dist = _distance(query, _nodes[id]->get_vector());
+            scalar dist = _distance(q, _nodes[id]->get_vector());
             candidates.emplace_back(id, dist);
         }
         
