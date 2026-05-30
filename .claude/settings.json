@@ -4,7 +4,21 @@
       "PowerShell($env:CC=\"clang\"; $env:CXX=\"clang++\"; cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release -S . 2>&1 | Select-Object -Last 30)",
       "Bash(git checkout *)",
       "PowerShell(& clang++ -std=c++17 -O2 -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DIS_WINDOWS -I include -I ut/include -I build/_deps/eigen-src ut/source/framework.cpp ut/source/test_hnsw.cpp -o ut_test.exe; if\\($?\\){ \"BUILD OK\"; & .\\\\ut_test.exe; \"exit code: $LASTEXITCODE\" })",
-      "PowerShell(if\\(-not \\(Test-Path build/_deps/eigen-src/Eigen/Dense\\)\\){ cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -S . 2>&1 | Out-Null }; & clang++ -std=c++17 -O2 -DNDEBUG -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DIS_WINDOWS -I include -I ut/include -I build/_deps/eigen-src ut/source/framework.cpp ut/source/test_hnsw.cpp -o ut_test.exe; if\\($?\\){ \"BUILD OK\"; & .\\\\ut_test.exe; \"exit code: $LASTEXITCODE\" })"
+      "PowerShell(if\\(-not \\(Test-Path build/_deps/eigen-src/Eigen/Dense\\)\\){ cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -S . 2>&1 | Out-Null }; & clang++ -std=c++17 -O2 -DNDEBUG -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DIS_WINDOWS -I include -I ut/include -I build/_deps/eigen-src ut/source/framework.cpp ut/source/test_hnsw.cpp -o ut_test.exe; if\\($?\\){ \"BUILD OK\"; & .\\\\ut_test.exe; \"exit code: $LASTEXITCODE\" })",
+      "Bash(gh run *)",
+      "PowerShell($g = Get-Command gh -ErrorAction SilentlyContinue; if\\($g\\){ \"gh: $\\($g.Source\\)\"; gh run list --limit 5 } else { \"gh not found\" })",
+      "PowerShell($g = Get-Command gh -ErrorAction SilentlyContinue; if\\($g\\){ \"gh: $\\($g.Source\\)\"; gh --version } else { \"gh still not on PATH \\(may need a new terminal\\)\" })",
+      "PowerShell($paths = @\\(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\",\"$env:LOCALAPPDATA\\\\Microsoft\\\\WinGet\\\\Links\\\\gh.exe\",\"C:\\\\Program Files \\(x86\\)\\\\GitHub CLI\\\\gh.exe\"\\); $gh = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1; if\\($gh\\){ \"found: $gh\"; & $gh --version } else { \"not found in common locations\"; Get-ChildItem -Path \"$env:LOCALAPPDATA\\\\Microsoft\\\\WinGet\\\\Packages\" -Filter gh.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName })",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh auth status 2>&1 | Select-Object -First 5; \"---runs---\"; & $gh run list --limit 6 2>&1)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh run view 26693224458 2>&1 | Select-Object -First 40)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh run view --job 78673209161 --log 2>&1 | Select-String -Pattern \"Test|ctest|Eigen|No tests|Errors while|Total Test|cannot find|Unable\" | Select-Object -First 40)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh run view --job 78673209161 --log-failed 2>&1 | ForEach-Object { \\($_ -split \"`t\"\\)[-1] } | Select-Object -First 60)",
+      "PowerShell(cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=\"-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH\" -S . 2>&1)",
+      "PowerShell(& ctest --test-dir build -N 2>&1)",
+      "PowerShell(\"=== ctest -N \\(registered tests\\) ===\")",
+      "PowerShell(cmake --build build --config Release 2>&1)",
+      "PowerShell(& ctest --test-dir build --build-config Release --output-on-failure 2>&1)",
+      "PowerShell(\"=== ctest ===\")"
     ]
   }
 }

@@ -11,6 +11,12 @@ FetchContent_Declare(
     eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
     GIT_TAG 3.4.0
+    # Eigen is header-only and we only consume its headers. Point SOURCE_SUBDIR
+    # at a non-existent directory so FetchContent downloads the source but does
+    # NOT add_subdirectory() Eigen's own CMake project. That project otherwise
+    # registers ~900 ctest tests (which aren't built, so `ctest` fails) and can
+    # fail to configure under some toolchains.
+    SOURCE_SUBDIR do-not-build
 )
 
 FetchContent_MakeAvailable(eigen)
