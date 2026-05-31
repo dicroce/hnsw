@@ -4,6 +4,15 @@
 #include <pybind11/eigen.h>
 #include "hnsw/hnsw.h"
 #include <sstream>
+#include <limits>
+#include <cstdint>
+
+// Sentinel written into batch_search result slots that have no neighbor (when
+// k exceeds the index size). INT64_MIN matches nanots's NANOTS_SEC_KEY_UNSET
+// convention and is a value a real label/key never takes, so it can't be
+// confused with a genuine result. (The companion distance is set to +inf, which
+// is the unambiguous "no result" signal regardless of label values.)
+static constexpr int64_t PYHNSW_NO_RESULT = std::numeric_limits<int64_t>::min();
 
 namespace py = pybind11;
 using namespace dicroce;
@@ -200,9 +209,9 @@ public:
                 distances_ptr[q * requested_k + i] = results[i].second;
             }
             
-            // Fill remaining slots with invalid values
+            // Fill remaining slots with the no-result sentinel (+inf distance).
             for (size_t i = results.size(); i < requested_k; ++i) {
-                indices_ptr[q * requested_k + i] = static_cast<int64_t>(-1);
+                indices_ptr[q * requested_k + i] = PYHNSW_NO_RESULT;
                 distances_ptr[q * requested_k + i] = std::numeric_limits<scalar>::infinity();
             }
         }
@@ -315,7 +324,10 @@ PYBIND11_MODULE(pyhnsw, m) {
              Returns
              -------
              indices : numpy.ndarray
-                 2D array of shape (n_queries, k) containing the indices of nearest neighbors
+                 2D int64 array of shape (n_queries, k) of neighbor labels. If a
+                 query has fewer than k neighbors, trailing slots are filled with
+                 INT64_MIN (and distance +inf). Detect real hits via np.isfinite
+                 on the distances, not by the index value (labels may be negative).
              distances : numpy.ndarray
                  2D array of shape (n_queries, k) containing the distances to nearest neighbors
              )pbdoc")

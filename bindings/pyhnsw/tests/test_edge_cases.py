@@ -181,12 +181,15 @@ class TestEdgeCases:
         
         queries = np.random.randn(n_queries, dim).astype(np.float32)
         indices, distances = index.batch_search(queries, k=k)
-        
-        # Each query should return only n_items results
+
+        # When k > index size, each query returns min(k, n_items) real hits and
+        # the remaining slots are filler (index -1, distance +inf). Identify real
+        # hits by finite distance -- unambiguous regardless of label values.
         for i in range(n_queries):
-            # Filter out invalid indices (represented as max uint64 value)
-            valid_indices = indices[i][indices[i] < n_items]
-            assert len(valid_indices) <= n_items
+            valid = np.isfinite(distances[i])
+            valid_indices = indices[i][valid]
+            assert len(valid_indices) == min(k, n_items)
+            assert np.all(valid_indices < n_items)  # default labels are insertion order
 
 
 class TestErrorHandling:
