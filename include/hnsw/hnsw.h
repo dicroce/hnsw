@@ -34,15 +34,19 @@ struct hnsw_config
 {
     // Maximum number of connections per element per layer (except layer 0)
     size_t M = 16;
-    // Maximum number of connections for layer 0 (usually 2*M)
-    size_t M0 = 32;
+    // Maximum number of connections for layer 0 (the dense bottom). 0 = auto,
+    // resolved to 2*M at construction (the standard choice).
+    size_t M0 = 0;
     // Size of the dynamic candidate list for construction
-    size_t CONSTRUCTION_EXPANSION_FACTOR = 200; 
+    size_t CONSTRUCTION_EXPANSION_FACTOR = 200;
     // Size of the dynamic candidate list for search
     size_t SEARCH_EXPANSION_FACTOR = 100;
-    // Normalization factor for level generation
-    float NORMALIZATION_FACTOR = 0.5f;
-    // Maximum level in the graph
+    // Level-generation normalization factor mL in level = floor(-ln(U) * mL).
+    // 0 = auto, resolved to 1/ln(M) at construction (the value from the HNSW
+    // paper, which makes P(level >= 1) = 1/M so upper layers stay sparse).
+    float NORMALIZATION_FACTOR = 0.0f;
+    // Maximum level in the graph (safety cap; with mL=1/ln(M) the natural top
+    // level is ~log_M(N), so this never binds for realistic N).
     size_t MAX_LEVEL = 16;
     
     // Distance metric to use (L2 or cosine)
@@ -175,7 +179,13 @@ public:
     hnsw(size_t dim, const hnsw_config& config = hnsw_config()) :
         _dim(dim), _config(config), _random_engine(std::random_device{}())
     {
-        _level_generator = std::geometric_distribution<size_t>(_config.NORMALIZATION_FACTOR);
+        // Resolve "auto" config values to concrete ones (so they also persist
+        // correctly through save()/load()).
+        if (_config.M0 == 0)
+            _config.M0 = 2 * _config.M;
+        if (_config.NORMALIZATION_FACTOR <= 0.0f)
+            _config.NORMALIZATION_FACTOR = static_cast<float>(
+                1.0 / std::log(static_cast<double>(std::max<size_t>(_config.M, 2))));
     }
     
     // Add a vector with an auto-assigned label equal to its insertion order
@@ -196,8 +206,11 @@ public:
 
         const size_t idx = _nodes.size();
 
-        // Pick a random level for this node
-        size_t random_level = _level_generator(_random_engine);
+        // Pick a random level: level = floor(-ln(U) * mL), U ~ uniform(0,1].
+        // (1 - U) maps the [0,1) draw into (0,1], avoiding log(0).
+        std::uniform_real_distribution<double> unit(0.0, 1.0);
+        const double mL = _config.NORMALIZATION_FACTOR;
+        size_t random_level = static_cast<size_t>(-std::log(1.0 - unit(_random_engine)) * mL);
         random_level = std::min(random_level, _config.MAX_LEVEL);
 
         if (random_level > _current_max_level)
@@ -572,8 +585,6 @@ private:
     size_t _current_max_level = 0;
     // Random number generator
     std::mt19937 _random_engine;
-    // For generating node levels
-    std::geometric_distribution<size_t> _level_generator;
 
     // ---------- tiny private helpers (no public API changes) ----------
     inline scalar _distance(size_t a_id, size_t b_id) const {
