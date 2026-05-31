@@ -5,6 +5,8 @@
 #include <random>
 #include <vector>
 #include <algorithm>
+#include <unordered_set>
+#include <unordered_map>
 #include <chrono>
 #include <cstdio>
 
@@ -217,6 +219,43 @@ void test_hnsw::test_edge_cases()
     }
 }
 
+void test_hnsw::test_external_ids()
+{
+    const size_t dim = 32, n = 800, k = 5;
+
+    std::mt19937 gen(55);
+    std::vector<vector_type> data(n);
+    for (auto& v : data) v = random_vector(gen, dim);
+
+    // Tag each vector with a non-trivial, non-contiguous label (e.g. a frame id):
+    // label = 1,000,000 + i*7. search() must return THESE, not insertion order.
+    hnsw<float> index(dim);
+    std::vector<int64_t> labels(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        labels[i] = 1000000 + static_cast<int64_t>(i) * 7;
+        index.add_item(data[i], labels[i]);
+    }
+
+    // Query with an exact copy of a known vector -> its own label must come back first.
+    const size_t pick = 321;
+    auto r = index.search(data[pick], k);
+    RTF_ASSERT(!r.empty());
+    RTF_ASSERT_EQUAL(r[0].first, labels[pick]);
+    RTF_ASSERT(r[0].second < 1e-4f);
+
+    // Every returned label must be one we actually inserted.
+    std::unordered_set<int64_t> valid(labels.begin(), labels.end());
+    for (const auto& hit : r)
+        RTF_ASSERT(valid.count(hit.first) == 1);
+
+    // The no-label overload still assigns insertion-order labels (back-compat).
+    hnsw<float> plain(dim);
+    for (size_t i = 0; i < 50; ++i) plain.add_item(data[i]);
+    auto pr = plain.search(data[10], 1);
+    RTF_ASSERT_EQUAL(pr[0].first, (int64_t)10);
+}
+
 void test_hnsw::test_save_load()
 {
     const size_t dim = 48, n = 1500, n_queries = 50, k = 10;
@@ -227,15 +266,21 @@ void test_hnsw::test_save_load()
     for (auto& v : data)    v = random_vector(gen, dim);
     for (auto& q : queries) q = random_vector(gen, dim);
 
-    // Build an index with non-default config so we verify config round-trips too.
+    // Build an index with non-default config so we verify config round-trips too,
+    // and custom (non-contiguous) labels so we verify labels survive the round-trip.
     hnsw_config cfg;
     cfg.M = 12; cfg.M0 = 24; cfg.CONSTRUCTION_EXPANSION_FACTOR = 150; cfg.SEARCH_EXPANSION_FACTOR = 80;
     hnsw<float> original(dim, cfg);
-    for (auto& v : data)
-        original.add_item(v);
+    std::unordered_map<int64_t, size_t> label_to_idx;
+    for (size_t i = 0; i < data.size(); ++i)
+    {
+        int64_t label = 500000 + static_cast<int64_t>(i) * 3;
+        label_to_idx[label] = i;
+        original.add_item(data[i], label);
+    }
 
     // Capture the original's answers before saving.
-    std::vector<std::vector<std::pair<size_t, float>>> before;
+    std::vector<std::vector<std::pair<int64_t, float>>> before;
     for (const auto& q : queries)
         before.push_back(original.search(q, k));
 
@@ -261,7 +306,8 @@ void test_hnsw::test_save_load()
         }
     }
 
-    // And recall against brute force must survive the round-trip.
+    // And recall against brute force must survive the round-trip. Returned hits
+    // are custom labels, so map them back to original indices to compare.
     double recall_sum = 0.0;
     for (const auto& q : queries)
     {
@@ -269,8 +315,11 @@ void test_hnsw::test_save_load()
         auto approx = loaded.search(q, k);
         size_t hits = 0;
         for (const auto& r : approx)
-            if (std::find(exact.begin(), exact.end(), r.first) != exact.end())
+        {
+            size_t idx = label_to_idx.at(r.first); // also asserts the label is valid
+            if (std::find(exact.begin(), exact.end(), idx) != exact.end())
                 ++hits;
+        }
         recall_sum += static_cast<double>(hits) / k;
     }
     double recall = recall_sum / n_queries;

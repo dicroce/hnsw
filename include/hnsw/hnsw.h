@@ -71,23 +71,30 @@ class hnsw_node final
 public:
     using vector_type = typename hnsw_types<scalar>::vector_type;
 
-    hnsw_node(const vector_type& vec, size_t id, size_t level) :
-        _vec(vec), _id(id), _level(level)
+    hnsw_node(const vector_type& vec, size_t id, size_t level, int64_t label) :
+        _vec(vec), _id(id), _level(level), _label(label)
     {
         // Initialize connections for each level
         _connections.resize(level + 1);
     }
-    
+
     const vector_type& get_vector() const
     {
         return _vec;
     }
-    
+
+    // Internal index of this node (its position in the index; used for graph wiring).
     size_t get_id() const
     {
         return _id;
     }
-    
+
+    // Caller-supplied external label returned by search().
+    int64_t get_label() const
+    {
+        return _label;
+    }
+
     size_t get_level() const
     {
         return _level;
@@ -125,10 +132,12 @@ public:
 private:
     // The vector data
     vector_type _vec;
-    // Unique identifier
+    // Internal index (position in the index), used for graph connections.
     size_t _id;
     // Level of this node in the hierarchy
     size_t _level;
+    // Caller-supplied external label (what search() returns).
+    int64_t _label;
     // Connections at each level
     std::vector<std::vector<size_t>> _connections;
 };
@@ -169,8 +178,18 @@ public:
         _level_generator = std::geometric_distribution<size_t>(_config.NORMALIZATION_FACTOR);
     }
     
-    // Add a vector to the index (normalized-once for COSINE, diversified selection)
+    // Add a vector with an auto-assigned label equal to its insertion order
+    // (0, 1, 2, ...), matching the pre-label behavior where search returned
+    // insertion indices.
     void add_item(const vector_type& vec)
+    {
+        add_item(vec, static_cast<int64_t>(_nodes.size()));
+    }
+
+    // Add a vector to the index. The label is returned by search() for any hit;
+    // it lets callers map results back to their own keys (e.g. a frame id). Labels
+    // need not be unique -- that's the caller's choice.
+    void add_item(const vector_type& vec, int64_t label)
     {
         if (vec.size() != _dim)
             throw std::invalid_argument("Vector dimension does not match index dimension");
@@ -194,14 +213,14 @@ public:
         // First node: just insert and set entrypoint
         if (_nodes.empty())
         {
-            auto node = std::make_unique<hnsw_node<scalar>>(stored, idx, random_level);
+            auto node = std::make_unique<hnsw_node<scalar>>(stored, idx, random_level, label);
             _nodes.push_back(std::move(node));
             _entrypoint = 0;
             return;
         }
 
         // Create the new node with reserved per-level capacity
-        auto next_node = std::make_unique<hnsw_node<scalar>>(stored, idx, random_level);
+        auto next_node = std::make_unique<hnsw_node<scalar>>(stored, idx, random_level, label);
         for (size_t i = 0; i <= random_level; ++i) {
             size_t capacity = (i == 0) ? _config.M0 : _config.M;
             next_node->_connections[i].reserve(capacity);
@@ -295,8 +314,10 @@ public:
         }
     }
     
-    // Search for k nearest neighbors
-    std::vector<std::pair<size_t, scalar>> search(const vector_type& query, size_t k) const
+    // Search for k nearest neighbors. Each result is (label, distance), where
+    // label is the caller-supplied id from add_item (insertion order if none was
+    // given). Results are sorted by ascending distance.
+    std::vector<std::pair<int64_t, scalar>> search(const vector_type& query, size_t k) const
     {
         if (query.size() != _dim)
             throw std::invalid_argument("Query dimension does not match index dimension");
@@ -344,11 +365,12 @@ public:
         // Sort by distance
         std::sort(candidates.begin(), candidates.end());
         
-        // Return top k results
-        std::vector<std::pair<size_t, scalar>> final_results;
+        // Return top k results, mapping internal node ids to external labels.
+        std::vector<std::pair<int64_t, scalar>> final_results;
         for (size_t i = 0; i < std::min(k, candidates.size()); ++i)
-            final_results.emplace_back(candidates[i]._id, candidates[i]._distance);
-        
+            final_results.emplace_back(_nodes[candidates[i]._id]->get_label(),
+                                       candidates[i]._distance);
+
         return final_results;
     }
 
@@ -376,9 +398,12 @@ public:
     //   u64 dim
     //   config: u64 M, u64 M0, u64 efC, u64 efS, f32 norm_factor, u64 max_level, u32 metric
     //   u64 entrypoint, u64 current_max_level, u64 node_count
-    //   per node: u64 level, scalar[dim] vector, then for L in [0,level]: u64 cnt, u64 ids[cnt]
+    //   per node (v2): u64 level, i64 label, scalar[dim] vector,
+    //                  then for L in [0,level]: u64 cnt, u64 ids[cnt]
+    //   (v1 had no per-node label; load() reads v1 and defaults label = position.)
     //
-    // Node id == position in the file (insertion order), so ids are implicit.
+    // The "ids" in a node's connection lists are internal node positions (graph
+    // wiring), distinct from the external i64 label that search() returns.
     // The byte_order_mark lets load() reject a file written on a machine with
     // different endianness rather than silently corrupting. The layout is kept
     // sequential and self-describing so a future zero-copy mmap loader is
@@ -418,6 +443,7 @@ public:
         {
             const uint64_t level = node->get_level();
             put_u64(level);
+            put(static_cast<int64_t>(node->get_label()));
 
             const vector_type& vec = node->get_vector();
             os.write(reinterpret_cast<const char*>(vec.data()),
@@ -466,8 +492,9 @@ public:
 
         uint32_t version = 0, bom = 0, scalar_size = 0, flags = 0;
         get(version); get(bom); get(scalar_size); get(flags);
-        if (version != FORMAT_VERSION)
+        if (version == 0 || version > FORMAT_VERSION)
             throw std::runtime_error("hnsw::load: unsupported format version");
+        const bool has_labels = (version >= 2); // v1 files predate external labels
         if (bom != BYTE_ORDER_MARK)
             throw std::runtime_error("hnsw::load: endianness mismatch (file written on a different platform)");
         if (scalar_size != sizeof(scalar))
@@ -496,6 +523,11 @@ public:
         {
             const uint64_t level = get_u64();
 
+            // v1 had no label; default it to the node's position to match the
+            // old "search returns insertion index" behavior.
+            int64_t label = static_cast<int64_t>(i);
+            if (has_labels) get(label);
+
             vector_type vec(static_cast<Eigen::Index>(dim));
             is.read(reinterpret_cast<char*>(vec.data()),
                     static_cast<std::streamsize>(dim * sizeof(scalar)));
@@ -503,7 +535,7 @@ public:
                 throw std::runtime_error("hnsw::load: truncated vector data: " + path);
 
             auto node = std::make_unique<hnsw_node<scalar>>(
-                vec, static_cast<size_t>(i), static_cast<size_t>(level));
+                vec, static_cast<size_t>(i), static_cast<size_t>(level), label);
 
             for (uint64_t L = 0; L <= level; ++L)
             {
@@ -523,8 +555,9 @@ public:
     // -------------------------------------------------------------------
 
 private:
-    // On-disk format constants.
-    static constexpr uint32_t FORMAT_VERSION = 1;
+    // On-disk format constants. v2 added the per-node external label; v1 files
+    // still load (label defaults to insertion position).
+    static constexpr uint32_t FORMAT_VERSION = 2;
     static constexpr uint32_t BYTE_ORDER_MARK = 0x01020304u;
 
     // Dimension of vectors

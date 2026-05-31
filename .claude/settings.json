@@ -18,7 +18,11 @@
       "PowerShell(\"=== ctest -N \\(registered tests\\) ===\")",
       "PowerShell(cmake --build build --config Release 2>&1)",
       "PowerShell(& ctest --test-dir build --build-config Release --output-on-failure 2>&1)",
-      "PowerShell(\"=== ctest ===\")"
+      "PowerShell(\"=== ctest ===\")",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh run list --branch main --limit 3 2>&1)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh run watch 26693473367 --exit-status 2>&1 | Select-Object -Last 30)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh run view 26693473367 2>&1 | Select-String -Pattern \"^X|^✓|build \\\\\\(|Test Python|conclusion|Test$|status\" | Select-Object -First 25)",
+      "PowerShell(if\\(-not \\(Test-Path build/_deps/eigen-src/Eigen/Dense\\)\\){ cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -S . 2>&1 | Out-Null }; & clang++ -std=c++17 -O2 -DNDEBUG -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DIS_WINDOWS -I include -I ut/include -I build/_deps/eigen-src ut/source/framework.cpp ut/source/test_hnsw.cpp -o ut_test.exe 2>&1 | Select-String -Pattern \"error|Error\" | Select-Object -First 20; if\\($LASTEXITCODE -eq 0 -and \\(Test-Path ut_test.exe\\)\\){ \"BUILD OK\"; & .\\\\ut_test.exe 2>&1 | Select-Object -Last 20; \"exit: $LASTEXITCODE\" })"
     ]
   }
 }

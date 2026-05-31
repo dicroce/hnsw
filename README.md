@@ -59,9 +59,28 @@ int main()
     auto results = index.search(query, k);
 
     for (const auto& result : results)
-        printf("ID: %zu, Distance: %f\n", result.first, result.second);
+        printf("label: %lld, distance: %f\n",
+               (long long)result.first, result.second);
 }
 ```
+
+### External IDs (labels)
+
+`search` returns `(label, distance)` pairs. By default a vector's label is its
+insertion order (0, 1, 2, …), but you can attach your own `int64` label so hits
+map straight back to your data (e.g. a frame id, a database row, a nanots
+`(timestamp)` key):
+
+```cpp
+index.add_item(embedding, /*label=*/frame_id);   // your id
+...
+auto hits = index.search(query, 10);
+for (auto& [label, dist] : hits)
+    lookup_frame(label);   // label is the frame_id you supplied
+```
+
+Labels need not be unique — that's your choice — and they are persisted by
+`save()`/`load()`.
 
 ### Persistence
 

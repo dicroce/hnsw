@@ -174,3 +174,53 @@ class TestDataTypes:
         
         assert len(indices) == 3
         assert distances.dtype == np.float32  # Results should be float32
+
+
+class TestExternalIds:
+    """Test caller-supplied labels (external ids)."""
+
+    def test_add_item_with_id(self):
+        """add_item(vec, id) -> search returns that id."""
+        dim = 16
+        index = pyhnsw.HNSW(dim=dim)
+
+        vecs = np.random.randn(20, dim).astype(np.float32)
+        labels = [1000 + i * 5 for i in range(20)]  # non-contiguous custom ids
+        for v, lbl in zip(vecs, labels):
+            index.add_item(v, lbl)
+
+        # Querying an exact copy returns its own label first, at ~zero distance.
+        idxs, dists = index.search(vecs[7], k=1)
+        assert idxs[0] == labels[7]
+        assert dists[0] < 1e-4
+
+    def test_add_items_with_ids(self):
+        """add_items(data, ids) -> all returned ids come from the supplied set."""
+        dim = 24
+        index = pyhnsw.HNSW(dim=dim)
+
+        data = np.random.randn(200, dim).astype(np.float32)
+        ids = np.arange(5000, 5000 + 200, dtype=np.int64)
+        index.add_items(data, ids=ids)
+
+        idxs, _ = index.search(data[42], k=10)
+        assert idxs[0] == 5042
+        assert set(idxs).issubset(set(ids.tolist()))
+
+    def test_default_labels_are_insertion_order(self):
+        """Without ids, labels default to insertion order (back-compat)."""
+        dim = 16
+        index = pyhnsw.HNSW(dim=dim)
+        data = np.random.randn(30, dim).astype(np.float32)
+        index.add_items(data)
+
+        idxs, _ = index.search(data[10], k=1)
+        assert idxs[0] == 10
+
+    def test_ids_length_mismatch_raises(self):
+        """A mismatched ids length is rejected."""
+        dim = 8
+        index = pyhnsw.HNSW(dim=dim)
+        data = np.random.randn(10, dim).astype(np.float32)
+        with pytest.raises(Exception):
+            index.add_items(data, ids=np.arange(5, dtype=np.int64))

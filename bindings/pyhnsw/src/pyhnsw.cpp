@@ -39,41 +39,60 @@ public:
         if (vec.ndim() != 1) {
             throw std::runtime_error("Input must be a 1D array");
         }
-        
+
         if (static_cast<size_t>(vec.size()) != dim_) {
             throw std::runtime_error("Vector dimension does not match index dimension");
         }
-        
+
         // Convert numpy array to Eigen vector
         Eigen::Map<const typename hnsw_types<scalar>::vector_type> eigen_vec(
             vec.data(), vec.size()
         );
-        
+
         typename hnsw_types<scalar>::vector_type vec_copy = eigen_vec;
-        index_->add_item(vec_copy);
+        if (item_id.is_none()) {
+            index_->add_item(vec_copy);
+        } else {
+            index_->add_item(vec_copy, item_id.cast<int64_t>());
+        }
     }
-    
-    void add_items(py::array_t<scalar> data) {
+
+    void add_items(py::array_t<scalar> data, py::object ids = py::none()) {
         if (data.ndim() != 2) {
             throw std::runtime_error("Input must be a 2D array");
         }
-        
+
         auto shape = data.shape();
         size_t num_items = shape[0];
         size_t item_dim = shape[1];
-        
+
         if (item_dim != dim_) {
             throw std::runtime_error("Vector dimension does not match index dimension");
         }
-        
+
+        // Optional per-row labels.
+        const int64_t* ids_ptr = nullptr;
+        py::array_t<int64_t> ids_arr;
+        if (!ids.is_none()) {
+            ids_arr = ids.cast<py::array_t<int64_t>>();
+            if (ids_arr.ndim() != 1 || static_cast<size_t>(ids_arr.size()) != num_items) {
+                throw std::runtime_error("ids must be a 1D array with one label per row");
+            }
+            ids_ptr = ids_arr.data();
+        }
+
         // Add each row as a separate item
         for (size_t i = 0; i < num_items; ++i) {
             Eigen::Map<const typename hnsw_types<scalar>::vector_type> eigen_vec(
                 data.data() + i * item_dim, item_dim
             );
-            
+
             typename hnsw_types<scalar>::vector_type vec_copy = eigen_vec;
-            index_->add_item(vec_copy);
+            if (ids_ptr) {
+                index_->add_item(vec_copy, ids_ptr[i]);
+            } else {
+                index_->add_item(vec_copy);
+            }
         }
     }
     
@@ -92,25 +111,25 @@ public:
         
         if (k == 0) {
             // Return empty arrays for k=0
-            py::array_t<size_t> indices(0);
+            py::array_t<int64_t> indices(0);
             py::array_t<scalar> distances(0);
             return py::make_tuple(indices, distances);
         }
-        
+
         // Convert numpy array to Eigen vector
         Eigen::Map<const typename hnsw_types<scalar>::vector_type> eigen_query(
             query.data(), query.size()
         );
-        
+
         typename hnsw_types<scalar>::vector_type query_copy = eigen_query;
         auto results = index_->search(query_copy, static_cast<size_t>(k));
-        
+
         // Convert results to numpy arrays
         size_t num_results = results.size();
-        py::array_t<size_t> indices(num_results);
+        py::array_t<int64_t> indices(num_results);
         py::array_t<scalar> distances(num_results);
-        
-        auto indices_ptr = static_cast<size_t*>(indices.mutable_data());
+
+        auto indices_ptr = static_cast<int64_t*>(indices.mutable_data());
         auto distances_ptr = static_cast<scalar*>(distances.mutable_data());
         
         for (size_t i = 0; i < num_results; ++i) {
@@ -141,29 +160,29 @@ public:
         // Handle k=0 case
         if (k == 0) {
             auto np = py::module_::import("numpy");
-            py::array_t<size_t> all_indices = np.attr("empty")(py::make_tuple(num_queries, 0), py::dtype::of<size_t>());
+            py::array_t<int64_t> all_indices = np.attr("empty")(py::make_tuple(num_queries, 0), py::dtype::of<int64_t>());
             py::array_t<scalar> all_distances = np.attr("empty")(py::make_tuple(num_queries, 0), py::dtype::of<scalar>());
             return py::make_tuple(all_indices, all_distances);
         }
-        
+
         // Handle empty index case - return empty arrays
         if (index_->size() == 0) {
             auto np = py::module_::import("numpy");
-            py::array_t<size_t> all_indices = np.attr("empty")(py::make_tuple(num_queries, 0), py::dtype::of<size_t>());
+            py::array_t<int64_t> all_indices = np.attr("empty")(py::make_tuple(num_queries, 0), py::dtype::of<int64_t>());
             py::array_t<scalar> all_distances = np.attr("empty")(py::make_tuple(num_queries, 0), py::dtype::of<scalar>());
             return py::make_tuple(all_indices, all_distances);
         }
-        
+
         // Always use requested k for array dimensions, but limit actual search
         size_t requested_k = static_cast<size_t>(k);
         size_t effective_k = std::min(requested_k, index_->size());
-        
+
         // Prepare output arrays with requested dimensions (for consistency)
         auto np = py::module_::import("numpy");
-        py::array_t<size_t> all_indices = np.attr("empty")(py::make_tuple(num_queries, requested_k), py::dtype::of<size_t>());
+        py::array_t<int64_t> all_indices = np.attr("empty")(py::make_tuple(num_queries, requested_k), py::dtype::of<int64_t>());
         py::array_t<scalar> all_distances = np.attr("empty")(py::make_tuple(num_queries, requested_k), py::dtype::of<scalar>());
-        
-        auto indices_ptr = static_cast<size_t*>(all_indices.mutable_data());
+
+        auto indices_ptr = static_cast<int64_t*>(all_indices.mutable_data());
         auto distances_ptr = static_cast<scalar*>(all_distances.mutable_data());
         
         // Process each query
@@ -183,7 +202,7 @@ public:
             
             // Fill remaining slots with invalid values
             for (size_t i = results.size(); i < requested_k; ++i) {
-                indices_ptr[q * requested_k + i] = static_cast<size_t>(-1);
+                indices_ptr[q * requested_k + i] = static_cast<int64_t>(-1);
                 distances_ptr[q * requested_k + i] = std::numeric_limits<scalar>::infinity();
             }
         }
@@ -248,13 +267,17 @@ PYBIND11_MODULE(pyhnsw, m) {
              )pbdoc")
         .def("add_items", &PyHNSW<float>::add_items,
              py::arg("data"),
+             py::arg("ids") = py::none(),
              R"pbdoc(
              Add multiple vectors to the index.
-             
+
              Parameters
              ----------
              data : numpy.ndarray
                  2D array of shape (n_items, dim) containing the vectors
+             ids : numpy.ndarray, optional
+                 1D int64 array of shape (n_items,) of labels returned by search.
+                 If omitted, labels default to insertion order.
              )pbdoc")
         .def("search", &PyHNSW<float>::search,
              py::arg("query"),
@@ -315,7 +338,8 @@ PYBIND11_MODULE(pyhnsw, m) {
              py::arg("vec"),
              py::arg("item_id") = py::none())
         .def("add_items", &PyHNSW<double>::add_items,
-             py::arg("data"))
+             py::arg("data"),
+             py::arg("ids") = py::none())
         .def("search", &PyHNSW<double>::search,
              py::arg("query"),
              py::arg("k") = 10)
