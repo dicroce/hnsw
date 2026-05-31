@@ -25,7 +25,11 @@
       "PowerShell(if\\(-not \\(Test-Path build/_deps/eigen-src/Eigen/Dense\\)\\){ cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -S . 2>&1 | Out-Null }; & clang++ -std=c++17 -O2 -DNDEBUG -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DIS_WINDOWS -I include -I ut/include -I build/_deps/eigen-src ut/source/framework.cpp ut/source/test_hnsw.cpp -o ut_test.exe 2>&1 | Select-String -Pattern \"error|Error\" | Select-Object -First 20; if\\($LASTEXITCODE -eq 0 -and \\(Test-Path ut_test.exe\\)\\){ \"BUILD OK\"; & .\\\\ut_test.exe 2>&1 | Select-Object -Last 20; \"exit: $LASTEXITCODE\" })",
       "PowerShell(python -c \"import yaml,sys; d=yaml.safe_load\\(open\\('.github/workflows/build-and-test.yml'\\)\\); print\\('YAML OK, jobs:', list\\(d['jobs'].keys\\(\\)\\)\\)\" 2>&1)",
       "PowerShell(python -m pip install --quiet pyyaml 2>&1)",
-      "PowerShell(python -c \"import yaml; d=yaml.safe_load\\(open\\('.github/workflows/build-and-test.yml'\\)\\); print\\('YAML OK, jobs:', list\\(d['jobs'].keys\\(\\)\\)\\)\")"
+      "PowerShell(python -c \"import yaml; d=yaml.safe_load\\(open\\('.github/workflows/build-and-test.yml'\\)\\); print\\('YAML OK, jobs:', list\\(d['jobs'].keys\\(\\)\\)\\)\")",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh run list --limit 6 2>&1)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh api repos/dicroce/hnsw/actions/runs/26698544569/artifacts --jq '.artifacts[] | \"\\\\\\(.name\\)\\\\t\\\\\\(.size_in_bytes\\)\\\\t\\\\\\(.expired\\)\"' 2>&1)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh api repos/dicroce/hnsw/actions/runs/26698544569/artifacts --jq '.artifacts[].name' 2>&1)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; Remove-Item -Recurse -Force _wheel_inspect -ErrorAction SilentlyContinue; & $gh run download 26698544569 -n cibw-wheels-windows-intel -D _wheel_inspect 2>&1; Get-ChildItem -Recurse _wheel_inspect | Select-Object Name,Length)"
     ]
   }
 }

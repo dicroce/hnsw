@@ -102,17 +102,16 @@ jobs:
         include:
           - os: linux-intel
             runs-on: ubuntu-latest
-          - os: linux-arm
-            runs-on: ubuntu-latest  # ARM builds on standard runners for now
           - os: windows-intel
             runs-on: windows-latest
-          - os: windows-arm
-            runs-on: windows-latest  # ARM builds on standard runners for now
-          # Temporarily disable macOS builds due to artifact corruption issues
-          # - os: macos-intel
-          #   runs-on: macos-13
-          # - os: macos-arm
-          #   runs-on: macos-latest
+          # NOTE: no ARM entries. The old linux-arm/windows-arm rows ran on
+          # standard x86 runners with CIBW_ARCHS=auto64, so they built *amd64*
+          # wheels with the SAME filenames as the intel rows. merge-multiple in
+          # upload_pypi then overwrote one with the other (different bytes, same
+          # name) and left trailing data, which PyPI rejects. Real ARM wheels
+          # need native ARM runners (or QEMU emulation for linux aarch64); add
+          # them back only with archs that produce distinctly-named wheels.
+          # macOS is also disabled (prior artifact-corruption issues).
 
     steps:
     - uses: actions/checkout@v4
