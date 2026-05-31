@@ -151,16 +151,10 @@ jobs:
         python -m twine check ./wheelhouse/*.whl
         python -c "import glob; import zipfile; [print(f'Testing {w}') or zipfile.ZipFile(w).testzip() or print('OK') for w in glob.glob('./wheelhouse/*.whl')]"
 
-    - name: Create artifacts directory
-      run: python -c "import os; os.makedirs('artifacts', exist_ok=True)"
-    
-    - name: Archive wheels 
-      run: python -c "import tarfile, glob, os; tar = tarfile.open('artifacts/wheels.tar.gz', 'w:gz'); [tar.add(w, arcname=os.path.basename(w)) for w in glob.glob('./wheelhouse/*.whl')]; tar.close()"
-    
     - uses: actions/upload-artifact@v4
       with:
         name: cibw-wheels-${{ matrix.os }}
-        path: artifacts/wheels.tar.gz
+        path: wheelhouse/*.whl
 
   make_sdist:
     name: Make SDist
@@ -190,65 +184,21 @@ jobs:
     if: github.event_name == 'release' && github.event.action == 'published'
     
     steps:
+    # Download every wheel artifact AND the sdist straight into dist/. Wheels
+    # have unique per-platform names and the sdist is a single tarball, so no
+    # extraction is needed (extracting the sdist is what broke the prior release).
     - uses: actions/download-artifact@v4
       with:
         pattern: cibw-*
-        path: artifacts
+        path: dist
         merge-multiple: true
-    
-    - name: Extract wheel archives
+
+    - name: Check distributions
       run: |
-        # Extract all wheel tar.gz files to dist directory
-        mkdir -p dist
-        for archive in artifacts/*.tar.gz; do
-          if [ -f "$archive" ]; then
-            echo "Extracting $archive..."
-            tar -xzf "$archive" -C dist/
-          fi
-        done
-    
-    - name: Remove corrupted wheels
-      run: |
-        # Sometimes macOS wheels get corrupted during artifact upload/download
-        # This attempts to repair them using wheel unpack/pack
-        python -m pip install wheel
-        for wheel in dist/*macos*.whl; do
-          if [ -f "$wheel" ]; then
-            echo "Checking $wheel..."
-            if ! python -c "import zipfile; zipfile.ZipFile('$wheel').testzip()" 2>/dev/null; then
-              echo "Attempting to repair $wheel..."
-              # Try to unpack and repack
-              python -m wheel unpack "$wheel" -d temp_wheel/ || continue
-              rm "$wheel"
-              python -m wheel pack temp_wheel/*/ -d dist/
-              rm -rf temp_wheel/
-            fi
-          fi
-        done
-    
-    - name: Debug downloaded artifacts
-      run: |
-        echo "=== Artifact directory structure ==="
-        find dist -type f -ls
-        echo -e "\n=== Wheel file details ==="
-        for wheel in dist/*.whl; do
-          if [ -f "$wheel" ]; then
-            echo "File: $wheel"
-            echo "Size: $(stat -c%s "$wheel") bytes"
-            echo "MD5: $(md5sum "$wheel")"
-            echo "First 16 bytes: $(xxd -l 16 "$wheel")"
-            echo "---"
-          fi
-        done
-    
-    - name: Validate wheels before upload
-      run: |
-        echo "=== Testing wheel integrity ==="
         python -m pip install --upgrade twine
-        python -c "import glob; import zipfile; [print(f'Testing {w}') or (lambda w: (lambda: zipfile.ZipFile(w).testzip())() if True else None)(w) or print('OK') for w in glob.glob('dist/*.whl')]" || echo "Some wheels may be corrupted"
-        echo "Running twine check..."
-        python -m twine check dist/*.whl dist/*.tar.gz || true
-    
+        ls -l dist/
+        python -m twine check dist/*
+
     - uses: pypa/gh-action-pypi-publish@release/v1
       with:
         packages-dir: dist/
