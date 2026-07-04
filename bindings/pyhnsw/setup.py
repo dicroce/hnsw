@@ -84,8 +84,8 @@ if os.path.exists(readme_path):
 
 setup(
     name="pyhnsw",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Tony Di Croce",
+    author_email="dicroce@gmail.com",
     description="Python bindings for HNSW (Hierarchical Navigable Small World) vector search",
     long_description=long_description,
     long_description_content_type="text/markdown",
