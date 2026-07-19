@@ -126,8 +126,10 @@ jobs:
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.16.5
       env:
-        CIBW_PROJECT_REQUIRES_PYTHON: ">=3.8"
-        CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
+        # Python 3.8 is EOL (Oct 2024) and modern setuptools requires >=3.9, so
+        # the cp38 build env can no longer resolve its build deps. Build 3.9+.
+        CIBW_PROJECT_REQUIRES_PYTHON: ">=3.9"
+        CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-*"
         CIBW_SKIP: "pp* *-win32"  # Skip PyPy and 32-bit Windows
         # Disable all tests
         CIBW_TEST_SKIP: "*"

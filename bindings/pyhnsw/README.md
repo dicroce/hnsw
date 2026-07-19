@@ -209,7 +209,7 @@ python test_pyhnsw.py
 
 ## Dependencies
 
-- Python >= 3.7
+- Python >= 3.9
 - NumPy >= 1.19.0
 - pybind11 >= 2.6.0
 - C++17 compatible compiler
