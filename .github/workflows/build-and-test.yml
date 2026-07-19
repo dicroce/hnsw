@@ -7,6 +7,10 @@ on:
     branches: [ "main" ]
   release:
     types: [published]
+  # Manual trigger: lets you build+validate wheels on demand WITHOUT publishing
+  # a release. upload_pypi stays gated on a real published release, so a manual
+  # run builds and artifact-uploads wheels but never pushes to PyPI.
+  workflow_dispatch:
 
 jobs:
   build:
@@ -96,7 +100,7 @@ jobs:
   build_wheels:
     name: Build wheels on ${{ matrix.runs-on }}
     runs-on: ${{ matrix.runs-on }}
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     strategy:
       matrix:
         include:
@@ -165,7 +169,7 @@ jobs:
   make_sdist:
     name: Make SDist
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     
     steps:
     - uses: actions/checkout@v4
