@@ -7,7 +7,7 @@ name = "pyhnsw"
 dynamic = ["version"]
 description = "Python bindings for HNSW (Hierarchical Navigable Small World) vector search"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "Tony Di Croce", email = "dicroce@gmail.com"},

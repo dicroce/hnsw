@@ -131,6 +131,12 @@ jobs:
         CIBW_PROJECT_REQUIRES_PYTHON: ">=3.9"
         CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-*"
         CIBW_SKIP: "pp* *-win32"  # Skip PyPy and 32-bit Windows
+        # Build on manylinux_2_28 (glibc >= 2.28, GCC 12+). The default
+        # manylinux2014 image is CentOS 7 (EOL): its yum mirrors are gone and
+        # its GCC is too old to build NumPy 2.x, which no longer ships a
+        # manylinux2014 wheel. manylinux_2_28 has prebuilt NumPy wheels and a
+        # modern toolchain. Wheels then require glibc >= 2.28 (RHEL8/Ubuntu 18.10+).
+        CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
         # Disable all tests
         CIBW_TEST_SKIP: "*"
         # Platform-specific configurations
