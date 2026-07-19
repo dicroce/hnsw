@@ -1,5 +1,13 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "setuptools-scm", "pybind11>=2.6.0", "numpy>=1.19.0"]
+# NOTE the pinned NumPy: it is a BUILD-time requirement (headers only). An
+# unbounded "numpy>=1.19.0" lets pip's resolver wander and, for some Python
+# versions, fall back to COMPILING NumPy from source in the wheel container --
+# which fails on the container's older GCC. NumPy 2.0.x is the last series
+# covering cp39-cp312 and ships prebuilt manylinux wheels for all of them, so
+# pinning here keeps every target on a wheel. pybind11 binds NumPy's C-API at
+# runtime, so building against 2.0 headers still yields a wheel compatible with
+# NumPy 1.x and 2.x at run time (see the looser runtime "numpy>=1.19.0" below).
+requires = ["setuptools>=42", "wheel", "setuptools-scm", "pybind11>=2.6.0", "numpy>=2.0.0,<2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
