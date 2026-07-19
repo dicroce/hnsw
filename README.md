@@ -1,8 +1,7 @@
 # HNSW - Hierarchical Navigable Small Worlds
 ## Nearest neighbor search for vector embeddings
 
-+ Single header, modern C++.
-+ Approximately 500 lines of code.
++ 2 header files.
 + Dependency-free.
 + Fast: hand-written SIMD distance kernels (AVX2/FMA, SSE2, scalar) selected at
   runtime to match the CPU it runs on. See `include/hnsw/simd_distance.h`.
