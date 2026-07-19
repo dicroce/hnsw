@@ -135,10 +135,9 @@ jobs:
         CIBW_ARCHS_LINUX: auto64
         CIBW_ARCHS_WINDOWS: auto64
         CIBW_ARCHS_MACOS: "x86_64 arm64"
-        # Ensure git is available for Eigen download and pre-fetch Eigen
-        CIBW_BEFORE_ALL_LINUX: "yum install -y git || apt-get update && apt-get install -y git || true"
-        CIBW_BEFORE_ALL_MACOS: "brew install git || true"
-        CIBW_BEFORE_ALL_WINDOWS: ""
+        # No external dependencies to fetch: hnsw is header-only and the SIMD
+        # kernels use only system intrinsics headers. (On macOS arm64 the build
+        # uses the portable scalar path -- a NEON kernel is a future addition.)
         # Increase build verbosity for debugging
         CIBW_BUILD_VERBOSITY: 2
       with:

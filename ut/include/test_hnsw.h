@@ -11,6 +11,7 @@ public:
       TEST(test_hnsw::test_edge_cases);
       TEST(test_hnsw::test_external_ids);
       TEST(test_hnsw::test_save_load);
+      TEST(test_hnsw::test_simd_kernels);
     RTF_FIXTURE_END();
 
     virtual ~test_hnsw() throw() {}
@@ -24,4 +25,5 @@ public:
     void test_edge_cases();
     void test_external_ids();
     void test_save_load();
+    void test_simd_kernels();
 };

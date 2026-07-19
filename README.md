@@ -3,7 +3,9 @@
 
 + Single header, modern C++.
 + Approximately 500 lines of code.
-+ Fast (uses Eigen for SIMD acceleration of distance calculations).
++ Dependency-free.
++ Fast: hand-written SIMD distance kernels (AVX2/FMA, SSE2, scalar) selected at
+  runtime to match the CPU it runs on. See `include/hnsw/simd_distance.h`.
 
 ## What is HNSW?
 ```
@@ -23,12 +25,11 @@ the value OR it finds the closest value on level 0 and the K nearest nodes seen 
 
 ### Example
 
-Vectors are passed as `Eigen::VectorX<scalar>` (e.g. `Eigen::VectorXf`), which
+Vectors are passed as `std::vector<scalar>` (e.g. `std::vector<float>`), which
 is aliased as `dicroce::hnsw_types<float>::vector_type`.
 
 ```cpp
 #include "hnsw/hnsw.h"
-#include <Eigen/Dense>
 #include <random>
 #include <cstdio>
 

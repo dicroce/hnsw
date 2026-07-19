@@ -5,22 +5,10 @@ set(PROJECT_VERSION_PATCH 1)
 project(hnsw VERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH})
 
 include(r_build.txt)
-include(FetchContent)
 
-FetchContent_Declare(
-    eigen
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3.4.0
-    # Eigen is header-only and we only consume its headers. Point SOURCE_SUBDIR
-    # at a non-existent directory so FetchContent downloads the source but does
-    # NOT add_subdirectory() Eigen's own CMake project. That project otherwise
-    # registers ~900 ctest tests (which aren't built, so `ctest` fails) and can
-    # fail to configure under some toolchains.
-    SOURCE_SUBDIR do-not-build
-)
-
-FetchContent_MakeAvailable(eigen)
-
+# hnsw is header-only and dependency-free: the distance kernels live in
+# include/hnsw/simd_distance.h and use only <immintrin.h> / <intrin.h> (system
+# headers). No Eigen, no FetchContent.
 add_library(
     hnsw
     INTERFACE
@@ -29,8 +17,15 @@ add_library(
 target_include_directories(
     hnsw
     INTERFACE include
-    ${eigen_SOURCE_DIR}
+)
+
+# The runtime-dispatch function pointers in simd_distance.h are C++17 `inline`
+# variables, so every consumer of hnsw must compile as C++17 or newer.
+target_compile_features(
+    hnsw
+    INTERFACE cxx_std_17
 )
 
 enable_testing()
 add_subdirectory(ut)
+add_subdirectory(bench)

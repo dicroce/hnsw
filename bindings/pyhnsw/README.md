@@ -4,7 +4,7 @@ Fast approximate nearest neighbor search using Hierarchical Navigable Small Worl
 
 ## Features
 
-- **Fast**: SIMD-accelerated distance calculations using Eigen
+- **Fast**: hand-written SIMD distance kernels (AVX2/FMA, SSE2, scalar) picked at runtime; no external dependencies
 - **Simple**: Clean Python API similar to popular ANN libraries
 - **Flexible**: Supports both L2 and cosine distance metrics
 - **Efficient**: Batch operations for adding and searching multiple vectors
@@ -212,7 +212,6 @@ python test_pyhnsw.py
 - Python >= 3.7
 - NumPy >= 1.19.0
 - pybind11 >= 2.6.0
-- Eigen3 (automatically fetched during build)
 - C++17 compatible compiler
 
 ## License

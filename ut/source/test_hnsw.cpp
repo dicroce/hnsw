@@ -1,7 +1,6 @@
 
 #include "test_hnsw.h"
 #include "hnsw/hnsw.h"
-#include "Eigen/Dense"
 #include <random>
 #include <vector>
 #include <algorithm>
@@ -34,7 +33,7 @@ namespace
     {
         std::vector<std::pair<float, size_t>> all(data.size());
         for (size_t i = 0; i < data.size(); ++i)
-            all[i] = { (query - data[i]).squaredNorm(), i };
+            all[i] = { simd::l2_squared(query.data(), data[i].data(), query.size()), i };
         k = std::min(k, all.size());
         std::partial_sort(all.begin(), all.begin() + k, all.end());
         std::vector<size_t> ids;
@@ -163,7 +162,10 @@ void test_hnsw::test_cosine()
     // Query scale must not change the ranking, and cosine distances must be
     // valid (in [0, 2]) regardless of whether the query was pre-normalized.
     auto r_raw  = index.search(query, 10);
-    auto r_norm = index.search((query / query.norm()).eval(), 10);
+    vector_type query_unit = query;
+    float qn = simd::norm(query.data(), query.size());
+    for (float& x : query_unit) x /= qn;
+    auto r_norm = index.search(query_unit, 10);
 
     RTF_ASSERT_EQUAL(r_raw.size(), r_norm.size());
     for (size_t i = 0; i < r_raw.size(); ++i)
@@ -178,7 +180,7 @@ void test_hnsw::test_edge_cases()
     // Search on an empty index returns nothing.
     {
         hnsw<float> index(4);
-        vector_type q(4); q.setZero();
+        vector_type q(4, 0.0f);
         RTF_ASSERT(index.search(q, 5).empty());
     }
 
@@ -188,7 +190,7 @@ void test_hnsw::test_edge_cases()
         std::mt19937 gen(1);
         for (int i = 0; i < 3; ++i)
             index.add_item(random_vector(gen, 4));
-        vector_type q(4); q.setZero();
+        vector_type q(4, 0.0f);
         RTF_ASSERT_EQUAL(index.search(q, 10).size(), (size_t)3);
     }
 
@@ -196,7 +198,7 @@ void test_hnsw::test_edge_cases()
     {
         hnsw<float> index(4);
         std::mt19937 gen(9);
-        vector_type target(4); target << 1, 2, 3, 4;
+        vector_type target{1.0f, 2.0f, 3.0f, 4.0f};
         size_t target_id = 0;
         for (int i = 0; i < 100; ++i)
         {
@@ -213,7 +215,7 @@ void test_hnsw::test_edge_cases()
     // Dimension mismatch is rejected.
     {
         hnsw<float> index(8);
-        vector_type wrong(4); wrong.setZero();
+        vector_type wrong(4, 0.0f);
         RTF_ASSERT_THROWS(index.add_item(wrong), std::invalid_argument);
         RTF_ASSERT_THROWS(index.search(wrong, 1), std::invalid_argument);
     }
@@ -337,5 +339,54 @@ void test_hnsw::test_save_load()
         catch (const std::exception&) { threw = true; }
         std::remove("hnsw_bad_index.bin");
         RTF_ASSERT(threw);
+    }
+}
+
+void test_hnsw::test_simd_kernels()
+{
+    // The scalar kernels are the ground truth. Every SIMD path must match them
+    // within a small relative tolerance (SIMD sums in a different order, so tiny
+    // rounding differences are expected -- see simd_distance.h Part 1).
+    //
+    // Dims are chosen to stress the scalar "tail": values that are NOT multiples
+    // of 8 (or 16) exercise the leftover-element loop after the vectorized body.
+    auto close = [](float got, float ref) {
+        const float denom = std::max(1.0f, std::fabs(ref));
+        return std::fabs(got - ref) / denom < 1e-4f;
+    };
+
+    std::mt19937 gen(2024);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    const size_t dims[] = {1, 3, 7, 8, 15, 16, 17, 31, 96, 127, 128, 129, 255, 256, 768, 1000};
+
+    for (size_t n : dims)
+    {
+        std::vector<float> a(n), b(n);
+        for (size_t i = 0; i < n; ++i) { a[i] = dist(gen); b[i] = dist(gen); }
+
+        const float l2_ref = simd::l2_squared_scalar(a.data(), b.data(), n);
+        const float dt_ref = simd::dot_scalar       (a.data(), b.data(), n);
+
+        // Public, runtime-dispatched entry points (what the index actually calls).
+        RTF_ASSERT(close(simd::l2_squared(a.data(), b.data(), n), l2_ref));
+        RTF_ASSERT(close(simd::dot       (a.data(), b.data(), n), dt_ref));
+
+#if defined(HNSW_SIMD_X86)
+        // Also pin each concrete kernel directly, so a regression in a path that
+        // isn't the one selected on THIS machine still gets caught.
+        RTF_ASSERT(close(simd::l2_squared_sse2(a.data(), b.data(), n), l2_ref));
+        RTF_ASSERT(close(simd::dot_sse2       (a.data(), b.data(), n), dt_ref));
+        RTF_ASSERT(close(simd::l2_squared_avx2(a.data(), b.data(), n), l2_ref));
+        RTF_ASSERT(close(simd::dot_avx2       (a.data(), b.data(), n), dt_ref));
+#endif
+    }
+
+    // norm(v) == sqrt(dot(v, v)).
+    {
+        std::vector<float> v(300);
+        for (auto& x : v) x = dist(gen);
+        float dotvv = simd::dot(v.data(), v.data(), v.size());
+        RTF_ASSERT(close(simd::norm(v.data(), v.size()), std::sqrt(dotvv)));
     }
 }

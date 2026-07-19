@@ -1,7 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-#include <pybind11/eigen.h>
 #include "hnsw/hnsw.h"
 #include <sstream>
 #include <limits>
@@ -53,12 +52,11 @@ public:
             throw std::runtime_error("Vector dimension does not match index dimension");
         }
 
-        // Convert numpy array to Eigen vector
-        Eigen::Map<const typename hnsw_types<scalar>::vector_type> eigen_vec(
-            vec.data(), vec.size()
+        // Copy the numpy row into our vector_type (std::vector<scalar>).
+        // Constructing from [data, data+size) is a plain contiguous copy.
+        typename hnsw_types<scalar>::vector_type vec_copy(
+            vec.data(), vec.data() + vec.size()
         );
-
-        typename hnsw_types<scalar>::vector_type vec_copy = eigen_vec;
         if (item_id.is_none()) {
             index_->add_item(vec_copy);
         } else {
@@ -92,11 +90,8 @@ public:
 
         // Add each row as a separate item
         for (size_t i = 0; i < num_items; ++i) {
-            Eigen::Map<const typename hnsw_types<scalar>::vector_type> eigen_vec(
-                data.data() + i * item_dim, item_dim
-            );
-
-            typename hnsw_types<scalar>::vector_type vec_copy = eigen_vec;
+            const scalar* row = data.data() + i * item_dim;
+            typename hnsw_types<scalar>::vector_type vec_copy(row, row + item_dim);
             if (ids_ptr) {
                 index_->add_item(vec_copy, ids_ptr[i]);
             } else {
@@ -125,12 +120,10 @@ public:
             return py::make_tuple(indices, distances);
         }
 
-        // Convert numpy array to Eigen vector
-        Eigen::Map<const typename hnsw_types<scalar>::vector_type> eigen_query(
-            query.data(), query.size()
+        // Copy the numpy query into our vector_type (std::vector<scalar>).
+        typename hnsw_types<scalar>::vector_type query_copy(
+            query.data(), query.data() + query.size()
         );
-
-        typename hnsw_types<scalar>::vector_type query_copy = eigen_query;
         auto results = index_->search(query_copy, static_cast<size_t>(k));
 
         // Convert results to numpy arrays
@@ -196,11 +189,8 @@ public:
         
         // Process each query
         for (size_t q = 0; q < num_queries; ++q) {
-            Eigen::Map<const typename hnsw_types<scalar>::vector_type> eigen_query(
-                queries.data() + q * query_dim, query_dim
-            );
-            
-            typename hnsw_types<scalar>::vector_type query_copy = eigen_query;
+            const scalar* row = queries.data() + q * query_dim;
+            typename hnsw_types<scalar>::vector_type query_copy(row, row + query_dim);
             auto results = index_->search(query_copy, effective_k);
             
             // Fill output arrays with actual results

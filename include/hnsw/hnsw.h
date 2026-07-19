@@ -16,7 +16,7 @@
 
 #include <cmath>
 
-#include <Eigen/Dense>
+#include "simd_distance.h"
 
 namespace dicroce
 {
@@ -61,7 +61,11 @@ struct hnsw_config
 
 template<typename scalar>
 struct hnsw_types {
-    using vector_type = Eigen::VectorX<scalar>;
+    // A vector is just a contiguous block of scalars. std::vector gives us that
+    // with no external dependency; the SIMD distance kernels (simd_distance.h)
+    // read the raw .data() pointer. We use unaligned SIMD loads, so the default
+    // allocator's alignment is fine -- no special aligned allocator needed.
+    using vector_type = std::vector<scalar>;
 };
 
 template<typename scalar>
@@ -219,8 +223,9 @@ public:
         // Prepare stored vector (normalize once for cosine)
         vector_type stored = vec;
         if (_config.METRIC == hnsw_config::distance_metric::COSINE) {
-            scalar n = stored.norm();
-            if (n > std::numeric_limits<scalar>::epsilon()) stored /= n;
+            scalar n = simd::norm(stored.data(), _dim);
+            if (n > std::numeric_limits<scalar>::epsilon())
+                for (scalar& x : stored) x /= n;
         }
 
         // First node: just insert and set entrypoint
@@ -345,10 +350,11 @@ public:
         vector_type query_normalized;
         if (_config.METRIC == hnsw_config::distance_metric::COSINE)
         {
-            scalar n = query.norm();
+            scalar n = simd::norm(query.data(), _dim);
             if (n > std::numeric_limits<scalar>::epsilon())
             {
-                query_normalized = query / n;
+                query_normalized = query;                 // copy, then scale in place
+                for (scalar& x : query_normalized) x /= n;
                 qptr = &query_normalized;
             }
         }
@@ -541,7 +547,7 @@ public:
             int64_t label = static_cast<int64_t>(i);
             if (has_labels) get(label);
 
-            vector_type vec(static_cast<Eigen::Index>(dim));
+            vector_type vec(static_cast<size_t>(dim));
             is.read(reinterpret_cast<char*>(vec.data()),
                     static_cast<std::streamsize>(dim * sizeof(scalar)));
             if (!is)
@@ -780,17 +786,18 @@ private:
         else return _cosine_distance(a, b);
     }
     
-    // L2 squared distance
+    // L2 squared distance. The hot path -- dispatched to the best SIMD kernel
+    // the running CPU supports (see simd_distance.h).
     scalar _l2_distance(const vector_type& a, const vector_type& b) const
     {
-        return (a - b).squaredNorm();
+        return simd::l2_squared(a.data(), b.data(), _dim);
     }
-    
-    // Cosine distance (1 - cosine similarity) with numerical stability
+
+    // Cosine distance (1 - cosine similarity). Vectors are pre-normalized on
+    // insert/query, so this is just 1 - dot(a, b).
     scalar _cosine_distance(const vector_type& a, const vector_type& b) const
     {
-        // Vectors are pre-normalized
-        return scalar(1.0) - a.dot(b);
+        return scalar(1.0) - simd::dot(a.data(), b.data(), _dim);
     }
 };
 
